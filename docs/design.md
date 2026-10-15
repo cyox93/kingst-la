@@ -316,3 +316,102 @@ golden 파일은 sigrok-cli를 설치하지 않고 **libsigrok 출력 모듈 소
 
 - 문턱 전압 −4~+4 V 연속값 지원 여부 (드라이버 공식은 ±4 V까지 계산함)
 - Linux udev / Windows WinUSB 환경
+
+---
+
+# 2차: 프로토콜 디코더 (`-P`)
+
+- 작성: 2026-10-16
+- 근거: libsigrokdecode (`type_decoder.c`, `instance.c`, `decoder.c`, `session.c`), sigrok-cli (`decode.c`, `show.c`, `parsers.c`)
+
+## 11. 목표와 결정
+
+sigrok 디코더 원본(`decoders/*/pd.py`)을 **수정 없이** 실행하는 순수 Python `sigrokdecode` 호환 계층을 만든다.
+
+| 항목 | 결정 |
+|---|---|
+| 디코더 원본 | `la5016 --install-decoders`가 libsigrokdecode 고정 커밋(기본 `71f45144…`)의 tarball을 받아 `decoders/`만 사용자 데이터 폴더(`…/la5016/decoders/`, `LA5016_DECODERS_DIR`로 변경 가능)에 설치. 저장소에 넣지 않음 |
+| 실행 모델 | stack마다 워커 스레드 1개 + 동기 핸드오프 (libsigrokdecode와 같은 의미) |
+| 조건 매칭 | numpy 벡터화, C `find_match`와 같은 의미 |
+| CLI 범위 | `-P`, `-A`, `-B`, `-L`, `--show -P`, `--protocol-decoder-samplenum`. `-M`, JSON trace는 이후 |
+| 의존성 | 추가 없음 (표준 라이브러리 + numpy) |
+
+## 12. 모듈
+
+```
+src/la5016/srd/
+├── api.py         sigrokdecode 모듈 대역: 상수, Decoder(register/put/wait/has_channel)
+├── conditions.py  wait() 조건 → 다음 일치 샘플 찾기 (순수 함수)
+├── loader.py      디코더 로드·메타데이터 검증·옵션 변환
+├── session.py     stack, 워커 스레드, DecoderSink(pipeline.Sink)
+├── annotate.py    annotation 텍스트·-A 필터·-B 바이너리 출력
+└── install.py     --install-decoders
+```
+
+- 로드 시 `sys.modules["sigrokdecode"] = la5016.srd.api`로 등록한다 (같은 이름의 최상위 패키지는 설치하지 않음).
+- 디코더 패키지는 디렉터리 이름으로 `sys.modules`에 등록하고(`spec_from_file_location`), `common.srdhelper` import를 위해
+  디코더 폴더를 `sys.path` **끝**에 추가한다 (표준 라이브러리를 가리지 않도록).
+
+## 13. 엔진 의미 (libsigrokdecode api_version 3)
+
+**호출 순서:** `Decoder()` → `self.options`를 기본값+사용자 값 dict로 교체 → `metadata(SRD_CONF_SAMPLERATE, rate)`(있으면)
+→ `start()` → `samplenum = 0`, `matched = None` → 워커 스레드에서 `decode()` → 청크마다 `flush()`(있으면, stack 위로 재귀).
+
+**`wait(conds)`:**
+- 인자 없음/`None`/`{}`/`[]`: 조건 없음. 첫 호출은 현재 샘플(0), 이후는 skip 1.
+- dict 안은 AND(삽입 순서로 short-circuit), list는 OR. 값의 첫 글자: `h` `l` `r` `f` `e` `n`. 문자열 키는 skip.
+- 현재 샘플을 **포함해** 검사하고 일치한 샘플에서 멈춘다(`samplenum` = 그 샘플). 엣지는 직전 샘플과 비교, 0번 샘플에는 엣지가 없음.
+- skip 카운터는 같은 dict의 앞선 항목이 모두 맞은 샘플에서만 증가하고, `n`번 증가 후 일치한다 (`{'skip': 0}`은 현재 샘플).
+- 반환: 디코더 채널 순서(channels → optional_channels)의 핀 값 tuple. 미연결 채널은 `0xff`, 그 채널의 조건은 항상 불일치.
+- `self.matched`: 조건별 bool tuple.
+- 데이터 끝: `samplenum` = 총 샘플 수, `EOFError` → 정상 종료.
+
+**`put(ss, es, output_id, data)`:** ANN `[cls, [str, …]]`(list 검증), PYTHON → 위 decoder들의 `decode(ss, es, data)`를 동기 호출,
+BINARY `[cls, bytes]`. `register(type, proto_id=inst_id)`는 같은 (type, proto_id)면 기존 id 반환. instance id는 `<id>-<n>`(1부터).
+
+**옵션 변환:** 기본값 타입 기준. int는 `int(s, 0)`(C `strtoll(...,0)`과 같게 `0x1f`, `010`=8), float, str. 모르는 키는 사용 오류.
+
+**예외:** 디코더 예외는 `srd: <이름>: Protocol decoder instance <inst>: <메시지>`를 stderr에 내고 세션을 멈춘다 (종료 1).
+stacked decoder의 `decode()` 예외는 sigrok처럼 로그만 남긴다.
+
+**청크 핸드오프:** `feed(chunk)`는 각 stack에 청크를 넘기고 그 stack이 청크를 다 소비해 다음 데이터를 기다릴 때까지 블록한다.
+출력 순서가 결정적이고, 메모리는 청크 1개 분량으로 일정하다.
+
+## 14. CLI
+
+| 옵션 | 동작 |
+|---|---|
+| `-P dec:ch=CH0:opt=v,dec2` | `-P`마다 stack 1개, `,`는 아래→위. 채널 매핑은 첫 decoder만. 채널 이름은 활성 채널 이름(`CH0` 또는 `-C`의 새 이름) |
+| `-A dec[=cls[:cls…]][,dec2…]` | class id, 없으면 row id로 찾음(대소문자·비영숫자 무시). 지정한 decoder만 출력 |
+| `-B dec[=bincls]` | 바이너리 바이트를 그대로 출력 (`-o` 있으면 파일로) |
+| `--protocol-decoder-samplenum` | 줄 앞에 `ss-es ` |
+| `-L` | 출력 형식 + 설치된 디코더 목록 (`  %-20s %s`) |
+| `--show -P dec[,dec…]` | sigrok-cli 형식 설명. 장치 불필요 |
+| `--install-decoders [all\|PD,PD…]` | 확장. 이름을 주면 그 decoder와 `common/`만 추가·교체 (설치된 것과 같은 커밋일 때만) |
+| `--list-decoders [available\|installed]` | 확장. available: tarball을 받아 `pd.py`를 **실행하지 않고** `ast`로 읽어 목록과 설치 여부 표시. installed: 오프라인 목록과 설치 커밋 |
+| `--decoders-commit COMMIT` | 확장. 위 두 옵션의 libsigrokdecode 커밋 (기본 고정 커밋) |
+
+- annotation 줄: `[ss-es ]<proto_id>: [<cls>: ]<text>`. 기본은 첫 문자열만. `-l ≥ 3`이면 범위·따옴표, `-l ≥ 4`면 class id와 모든 문자열.
+- `-P`가 있으면 로직 출력(`-O`)은 내지 않는다 (sigrok-cli와 같음). `-B`가 있으면 annotation 대신 바이너리만.
+- sigrok-cli와 다른 점:
+  - 미연결 채널 조건(C에서는 미정의 동작)은 항상 불일치.
+  - 잘못된 `-P` 옵션·채널, 필수 채널 누락은 경고가 아니라 사용 오류 (sigrok-cli는 경고 후 그 decoder를 빼거나 이전 매핑을 유지).
+  - `-P`와 `-o`를 함께 주면 annotation(또는 `-B` 바이너리)을 그 파일에 쓴다 (sigrok-cli는 `-P`일 때 파일 출력이 없음).
+  - 아래 decoder의 `decode()`가 예외 없이 반환되면 그 stack만 멈추고 캡처는 계속한다 (sigrok-cli는 세션 전체를 멈춤).
+
+## 15. 테스트
+
+- 엔진: 테스트 안의 가짜 decoder로 호출 순서·put·stack·예외·옵션 변환 검증.
+- `conditions`: C 의미를 샘플 단위로 옮긴 참조 구현과 numpy 구현을 무작위 신호·조건으로 대조.
+- 실제 decoder(`-m decoders`, 설치 시에만): 합성 UART/I2C/SPI 신호 → 기대 annotation, 청크 분할 불변성.
+- 실기: CH0 1 kHz 신호에 `timing` decoder → 주기 1 ms.
+
+## 16. 검증 결과 (2026-10-16)
+
+| 항목 | 결과 |
+|---|---|
+| 디코더 로드 | libsigrokdecode `71f45144`의 131개 전부 로드 |
+| 조건 매칭 | numpy 구현 = 샘플 단위 참조 구현 (무작위 300건) |
+| 합성 신호 | uart(115200, 9600 bin), i2c 주소·데이터·start/stop, spi mode 0, timing 1 kHz, i2c→eeprom24xx stack |
+| 속도 | uart 1100만 샘플(1024 바이트) 1 s 미만 |
+| 실기 데이터 | 1차 Ctrl-C 테스트에서 저장한 1 MSa/s CH0 1 kHz 캡처(181만 샘플)에 `timing` → 주기 1000±2 µs가 다수, 문턱 글리치에서 2 µs 주기도 보임 |

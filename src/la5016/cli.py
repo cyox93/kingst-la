@@ -45,6 +45,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--show", action="store_true", help="show device options")
     p.add_argument("--samples", metavar="N")
     p.add_argument("--time", metavar="MS")
+    p.add_argument("-P", "--protocol-decoders", action="append", default=[], metavar="PD[:OPT=VAL...][,PD...]",
+                   help="protocol decoder stack, e.g. uart:rx=CH0:baudrate=115200")
+    p.add_argument("-A", "--protocol-decoder-annotations", metavar="PD[=ANN[:ANN...]][,...]")
+    p.add_argument("-B", "--protocol-decoder-binary", metavar="PD[=CLASS][,...]")
+    p.add_argument("--protocol-decoder-samplenum", action="store_true", help="show sample numbers")
+    p.add_argument("-L", "--list-supported", action="store_true", help="list formats and decoders")
+    p.add_argument("--install-decoders", nargs="?", const="all", metavar="all|PD[,PD...]",
+                   help="download sigrok protocol decoders, all or the named ones (la5016 extension)")
+    p.add_argument("--decoders-commit", metavar="COMMIT",
+                   help="libsigrokdecode commit for --install-decoders/--list-decoders")
+    p.add_argument("--list-decoders", nargs="?", const="available", choices=("available", "installed"),
+                   help="decoders that can be installed (default, needs network) or are installed (la5016 extension)")
     p.add_argument("--extract-firmware", nargs="?", const=firmware.DEFAULT_KINGSTVIS, metavar="KINGSTVIS",
                    help="extract FX2 firmware and FPGA bitstreams from KingstVIS (la5016 extension)")
     return p
@@ -78,6 +90,73 @@ def cmd_extract(app: str, out) -> int:
     out.write("Extracted to %s:\n" % firmware.firmware_dir())
     for path, size, digest in files:
         out.write("  %-34s %8d  sha256 %s\n" % (path.name, size, digest))
+    return 0
+
+
+def cmd_list_decoders(which: str, commit: Optional[str], loglevel: int, out) -> int:
+    from la5016.srd import install
+    inst = install.installed_entries()
+    ver = install.installed_version()
+    where = install.decoders_dir()
+    if which == "installed":
+        title = "Installed protocol decoders (%s, %s):" % (
+            "libsigrokdecode %s" % ver[:8] if ver else "version unknown", where)
+        out.write(install.list_text(inst, title, loglevel=loglevel))
+        return 0
+    commit = commit or install.DEFAULT_COMMIT
+    entries = install.archive_entries(install.fetch(commit))
+    title = "Available protocol decoders (libsigrokdecode %s; installed: %s):" % (
+        commit[:8], "%d, %s" % (len(inst), ver[:8]) if inst and ver else len(inst))
+    out.write(install.list_text(entries, title, {e.name for e in inst}, loglevel))
+    return 0
+
+
+def cmd_install_decoders(which: str, commit: Optional[str], out) -> int:
+    from la5016.srd import install
+    names = None if which == "all" else [n.strip() for n in which.split(",") if n.strip()]
+    if names is not None and not names:
+        raise UsageError("no decoder names given to --install-decoders")
+    commit = commit or install.DEFAULT_COMMIT
+    try:
+        dest, count = install.install(commit, names=names)
+    except install.InstallError as e:
+        raise UsageError(str(e)) from None
+    out.write("Installed %d protocol decoder%s (libsigrokdecode %s) to %s\n"
+              % (count, "" if count == 1 else "s", commit[:8], dest))
+    return 0
+
+
+_FORMAT_DESCRIPTIONS = (
+    ("binary", "Raw binary logic data"),
+    ("bits", "ASCII rendering using 0/1"),
+    ("csv", "Comma-separated values"),
+    ("hex", "Hexadecimal digits"),
+    ("vcd", "Value Change Dump data"),
+)
+
+
+def cmd_list(args, out) -> int:
+    from la5016.srd import annotate, loader
+    out.write("Supported hardware drivers:\n  %-20s %s\n\n" % (options.DRIVER, "Kingst LA2016"))
+    out.write("Supported output formats:\n")
+    for name, desc in _FORMAT_DESCRIPTIONS:
+        out.write("  %-20s %s\n" % (name, desc))
+    out.write("\n")
+    infos = []
+    for name in loader.available():
+        try:
+            infos.append(loader.load(name))
+        except loader.LoadError as e:
+            log.warning("%s", e)
+    out.write(annotate.list_text(infos, args.loglevel))
+    return 0
+
+
+def cmd_show_decoders(args, out) -> int:
+    from la5016.srd import annotate, loader
+    for text in args.protocol_decoders:
+        for spec in loader.parse_pd(text):
+            out.write(annotate.show_text(loader.load(spec.name)))
     return 0
 
 
@@ -130,6 +209,33 @@ def _rate_str(rate: int) -> str:
     return "%d Hz" % rate
 
 
+def _decoder_sink(args, channels: List[Channel], out: BinaryIO):
+    """-P: decoder stacks replace the logic output, as in sigrok-cli."""
+    import io
+    from la5016.srd import annotate, loader, session
+    try:
+        if args.protocol_decoder_binary:
+            callbacks = annotate.BinaryWriter(out, {})
+        else:
+            text = io.TextIOWrapper(out, encoding="utf-8", write_through=True)
+            text.close = lambda: None  # the caller owns `out`
+            callbacks = annotate.AnnotationPrinter(text, {}, args.protocol_decoder_samplenum, args.loglevel)
+        stacks = loader.build_stacks(args.protocol_decoders, channels, callbacks)
+        infos = {}
+        todo = list(stacks)
+        while todo:
+            inst = todo.pop()
+            infos[inst.info.id] = inst.info
+            todo.extend(inst.next)
+        if args.protocol_decoder_binary:
+            callbacks.visible = annotate.parse_binary(args.protocol_decoder_binary, infos)
+        else:
+            callbacks.visible = annotate.parse_annotations(args.protocol_decoder_annotations, infos)
+    except loader.LoadError as e:
+        raise UsageError(str(e)) from None
+    return session.DecoderSink(stacks)
+
+
 class _WaitTrigger:
     """-w: pass samples only from the trigger on."""
 
@@ -149,6 +255,10 @@ class _WaitTrigger:
 
     def end(self) -> None:
         self.sink.end()
+
+    def abort(self) -> None:
+        if hasattr(self.sink, "abort"):
+            self.sink.abort()
 
 
 class _Interrupts:
@@ -214,8 +324,11 @@ def cmd_capture(args, open_device=None) -> int:
     out: BinaryIO
     out = open(args.output_file, "wb") if args.output_file else sys.stdout.buffer
     try:
-        sink = output.create(fmt, out, fmt_opts)
-    except ValueError as e:
+        if args.protocol_decoders:
+            sink = _decoder_sink(args, channels, out)
+        else:
+            sink = output.create(fmt, out, fmt_opts)
+    except (ValueError, UsageError) as e:
         if args.output_file:
             out.close()
             os.unlink(args.output_file)
@@ -239,6 +352,8 @@ def cmd_capture(args, open_device=None) -> int:
             log.info("%d samples", stats.samples)
             ok = True
     finally:
+        if not ok and hasattr(sink, "abort"):
+            sink.abort()
         if dev is not None:
             dev.close()
         if args.output_file:
@@ -260,6 +375,16 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
             return 0
         if args.extract_firmware:
             return cmd_extract(args.extract_firmware, sys.stdout)
+        if args.list_decoders:
+            return cmd_list_decoders(args.list_decoders, args.decoders_commit, args.loglevel, sys.stdout)
+        if args.install_decoders is not None:
+            return cmd_install_decoders(args.install_decoders, args.decoders_commit, sys.stdout)
+        if args.list_supported:
+            return cmd_list(args, sys.stdout)
+        if (args.protocol_decoder_annotations or args.protocol_decoder_binary) and not args.protocol_decoders:
+            raise UsageError("-A/-B need protocol decoders (-P)")
+        if args.show and args.protocol_decoders:
+            return cmd_show_decoders(args, sys.stdout)
         if args.driver:
             name, _ = options.parse_driver(args.driver)
         if args.scan:
@@ -267,7 +392,7 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
         if args.show:
             return cmd_show(args, sys.stdout)
         if any((args.samples, args.time, args.output_file, args.output_format, args.triggers,
-                args.wait_trigger)):
+                args.wait_trigger, args.protocol_decoders)):
             return cmd_capture(args, open_device)
         parser.print_help()
         return 0
@@ -277,8 +402,19 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
     except KeyboardInterrupt:
         log.error("aborted")
         return 130
-    except Exception as e:  # device, USB and firmware errors
+    except BrokenPipeError:
+        # Reader went away (e.g. piped into head); stay quiet like other CLI tools.
+        try:
+            sys.stdout = open(os.devnull, "w")
+        except OSError:
+            pass
+        return 0
+    except Exception as e:  # device, USB, firmware and decoder errors
         if args.loglevel >= 4:
             raise
-        log.error("%s", e)
+        from la5016.srd.session import DecoderError
+        if isinstance(e, DecoderError):
+            logging.getLogger("srd").error("%s", e)
+        else:
+            log.error("%s", e)
         return 1

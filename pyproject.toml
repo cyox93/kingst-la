@@ -31,5 +31,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not hw'"
-markers = ["hw: needs a connected LA5016 with extracted firmware"]
+addopts = "-m 'not hw and not decoders'"
+markers = ["hw: needs a connected LA5016 with extracted firmware", "decoders: needs installed sigrok protocol decoders"]

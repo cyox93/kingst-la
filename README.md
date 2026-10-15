@@ -44,6 +44,25 @@ la5016 -c samplerate=500m -o cap.vcd     # no limit: stops when memory is full o
 | `-o FILE` | without `-O` the format follows the extension (`.vcd`, `.csv`, `.bin`) |
 | `-l 0..5` | log level; 3 shows progress, 4 adds USB register traffic |
 
+### Protocol decoders
+
+```sh
+la5016 --list-decoders                         # what can be installed (needs network), marks installed ones
+la5016 --install-decoders                       # all of them; fetches sigrok's decoders (GPL) at a pinned commit
+la5016 --install-decoders uart,i2c              # or just some (common/ always comes along)
+la5016 --list-decoders installed               # offline: what is installed, and from which commit
+la5016 -L                                       # formats and decoders
+la5016 --show -P uart                           # channels, options, annotation classes
+la5016 -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -A uart=rx-data
+la5016 -c samplerate=4m --time 50ms -P i2c:scl=CH0:sda=CH1,eeprom24xx
+la5016 -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -B uart=rx -o rx.bin
+```
+
+The decoders are libsigrokdecode's own Python files, run unmodified by a pure Python
+`sigrokdecode` engine (no libsigrokdecode build needed). With `-P` the logic output is
+replaced by decoder output, as in sigrok-cli. `--protocol-decoder-samplenum` prefixes each
+annotation with its sample range; `-l 3`/`-l 4` add quotes, class ids and short texts.
+
 Ctrl-C while sampling stops the capture and still writes what was sampled.
 A second Ctrl-C, or one during the download, aborts (exit 130) and removes the `-o` file.
 
@@ -60,6 +79,7 @@ Differences from sigrok-cli are listed in [docs/design.md](docs/design.md) §5.4
 ```sh
 pytest                                                    # no hardware
 LA5016_TEST_FREQ=1000 LA5016_TEST_THRESHOLD=0.6 pytest -m hw  # LA5016 with a 1 kHz signal on CH0
+pytest -m decoders                                        # needs --install-decoders
 ```
 
 ## License

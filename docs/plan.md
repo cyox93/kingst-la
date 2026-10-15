@@ -27,3 +27,17 @@
 - `pytest` 전부 통과 (장비 없음)
 - 실기: CH0 입력 신호를 캡처해 주기를 계산하고, 발생기 설정과 비교
 - VCD가 형식상 유효 (GTKWave/PulseView 호환 헤더)
+
+---
+
+# 2차 구현 계획 — 프로토콜 디코더
+
+| # | 작업 | 파일 | 검증 |
+|---|---|---|---|
+| 1 | 조건 매칭 + 참조 구현 | `srd/conditions.py`, `tests/test_srd_conditions.py` | 무작위 대조, skip/엣지/첫 샘플/미연결 |
+| 2 | api + session (스레드 핸드오프, put, stack, flush, 예외) | `srd/api.py`, `srd/session.py`, `tests/test_srd_engine.py` | 가짜 decoder |
+| 3 | loader (메타데이터 검증, 옵션 변환, import 경로) | `srd/loader.py` | 가짜 decoder 패키지 디렉터리 |
+| 4 | install (tarball → decoders/) | `srd/install.py` | 로컬 tarball로 테스트 |
+| 5 | annotate (-A, -B, samplenum, loglevel 형식) + `-L`, `--show -P` | `srd/annotate.py`, `cli.py` | 문자열 비교 |
+| 6 | 실제 decoder 테스트 | `tests/test_srd_decoders.py` (`-m decoders`) | uart/i2c/spi/timing |
+| 7 | 실기 | `timing` on CH0 | 1 ms |
