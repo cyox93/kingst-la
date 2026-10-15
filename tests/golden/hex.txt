@@ -1,0 +1,6 @@
+la5016 0.1.0
+Acquisition with 4/16 channels at 1 MHz
+CH0:33 33 33 33 33 
+CH1:0f 0f 0f 0f 0f 
+SDA:07 ff f0 00 00 
+CH9:00 08 00 00 7f 
