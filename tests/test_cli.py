@@ -166,3 +166,56 @@ def test_decoder_usage_errors(toggles, argv):
 def test_show_decoder_without_device(toggles, capsys):
     assert cli.main(["--show", "-P", "toggles"]) == 0
     assert capsys.readouterr().out.startswith("ID: toggles\nName: Toggles\n")
+
+
+# --- streaming (continuous=on) ----------------------------------------------
+
+def _stream_words(samples, channels):
+    import struct
+    out = b""
+    for g in range(0, len(samples), 16):
+        for ch in channels:
+            w = 0
+            for i, s in enumerate(samples[g:g + 16]):
+                w |= ((s >> ch) & 1) << i
+            out += struct.pack("<H", w)
+    return out
+
+
+def test_stream_to_csv(capsysbinary):
+    t = FakeTransport()
+    samples = [i % 2 for i in range(48)]
+    raw = _stream_words(samples, [0])
+    t.stream_data = [raw[:5], raw[5:]]
+    rc = cli.main(["-c", "continuous=on:samplerate=1m", "--samples", "40", "-C", "CH0",
+                   "-O", "csv:header=false:label=off"], open_device=_opener(t))
+    assert rc == 0
+    assert capsysbinary.readouterr().out.decode().split() == [str(s) for s in samples[:40]]
+    assert t.writes(d.REG_RUN)[-1] == bytes([d.RUNMODE_HALT])
+
+
+def test_stream_break_off_keeps_output_and_fails(tmp_path):
+    t = FakeTransport()
+    t.stream_data = [_stream_words([1] * 32, [0])]
+    t.stream_error = "stream stopped: no data"
+    path = tmp_path / "s.csv"
+    rc = cli.main(["-c", "continuous=on:samplerate=1m", "-C", "CH0", "-O", "csv:header=false:label=off",
+                   "-o", str(path)], open_device=_opener(t))
+    assert rc == 1
+    assert path.read_text().split() == ["1"] * 32
+
+
+@pytest.mark.parametrize("argv", [
+    ["-c", "continuous=on", "-t", "CH0=r", "--samples", "10"],
+    ["-c", "continuous=on:samplerate=200m", "--samples", "10"],
+])
+def test_stream_usage_errors(argv):
+    assert cli.main(argv, open_device=_opener(FakeTransport())) == 1
+
+
+def test_stream_default_samplerate_is_100m(capsysbinary):
+    t = FakeTransport()
+    t.stream_data = [_stream_words([0] * 16, [0])]
+    assert cli.main(["-c", "continuous=on", "--samples", "16", "-C", "CH0", "-O", "vcd"],
+                    open_device=_opener(t)) == 0
+    assert b"at 100 MHz" in capsysbinary.readouterr().out

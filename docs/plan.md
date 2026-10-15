@@ -41,3 +41,15 @@
 | 5 | annotate (-A, -B, samplenum, loglevel 형식) + `-L`, `--show -P` | `srd/annotate.py`, `cli.py` | 문자열 비교 |
 | 6 | 실제 decoder 테스트 | `tests/test_srd_decoders.py` (`-m decoders`) | uart/i2c/spi/timing |
 | 7 | 실기 | `timing` on CH0 | 1 ms |
+
+---
+
+# 3차 구현 계획 — 연속 스트리밍
+
+| # | 작업 | 파일 | 검증 |
+|---|---|---|---|
+| 1 | de-interleave | `stream.py`, `tests/test_stream.py` | 참조 인코더 왕복, 청크 분할, 처리량 > 25 MB/s |
+| 2 | 수신 스레드 | `usb.py` `BulkReader` | 실기 처리량·끊김 |
+| 3 | 장치 시작/정지 | `device.py` `Device.stream`, `Stream` | FakeTransport 순서 테스트 |
+| 4 | CLI | `cli.py` `-c continuous=on` | 가짜 장치 end-to-end, 끊김 시 출력 유지 |
+| 5 | 실기 | `tests/test_hw.py` | 실시간성, 분주비 규칙 |

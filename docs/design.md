@@ -305,7 +305,7 @@ golden 파일은 sigrok-cli를 설치하지 않고 **libsigrok 출력 모듈 소
 | FPGA 업로드 | 247485 B, 0.94 s, 이후 `check_fpga_bitstream` 통과 |
 | 문턱 | 사인파 피크가 0.6~0.9 V라 0.6 V에서만 검출. 연결 안 된 입력은 0.4 V에서 1로 읽힘 |
 | 주파수 | 1 MSa/s: 주기 중앙값 1000 샘플, FFT 1000 Hz. 200/500 MSa/s도 FFT 1000 Hz |
-| 분주 | 300 MSa/s 요청 → 400 MSa/s로 동작 (경고 출력) |
+| 분주 | ~~300 MSa/s 요청 → 400 MSa/s~~ 잘못된 기록. 실제로는 200 MSa/s (17절 분주비 규칙) |
 | 트리거 | `r`/`f` 모두 트리거 지점 전후 값이 0→1 / 1→0, captureratio 50 % 근처 |
 | RLE | 시퀀스 번호 끊김 0 (모든 캡처) |
 | 처리량 | pyusb 동기 read **42.9 MB/s** (55.7 MB). 스트리밍 최대 25 MB/s보다 큼 |
@@ -415,3 +415,81 @@ stacked decoder의 `decode()` 예외는 sigrok처럼 로그만 남긴다.
 | 합성 신호 | uart(115200, 9600 bin), i2c 주소·데이터·start/stop, spi mode 0, timing 1 kHz, i2c→eeprom24xx stack |
 | 속도 | uart 1100만 샘플(1024 바이트) 1 s 미만 |
 | 실기 데이터 | 1차 Ctrl-C 테스트에서 저장한 1 MSa/s CH0 1 kHz 캡처(181만 샘플)에 `timing` → 주기 1000±2 µs가 다수, 문턱 글리치에서 2 µs 주기도 보임 |
+
+---
+
+# 3차: 연속 스트리밍 (`-c continuous=on`)
+
+- 작성: 2026-10-16
+- 근거: libsigrok kingst-la2016 `stream_data()`, `la2016_start_acquisition()`, `la2016_receive_data()` + 실측
+
+## 17. 실측으로 확인한 하드웨어 사실
+
+**분주비 규칙 (SDRAM·스트리밍 공통).** LA5016이 실제로 쓰는 분주비는 1, 4, 8의 배수뿐이다.
+캡처 소요 시간(SDRAM)과 수신 샘플 수/경과 시간(스트리밍)으로 측정했다.
+
+| 레지스터 분주비 | 실제 |
+|---|---|
+| 1 | 500 MHz |
+| 2–7 | 200 MHz (분주비 4와 같음) |
+| ≥ 8 | `800 MHz / (분주비 & ~7)` — 예: 20 → 50 MHz, 100 → 8.33 MHz |
+
+libsigrok은 `800 MHz / 분주비`를 실제 레이트로 보고하므로, 1-2-5 목록 밖의 레이트에서는 시간축이 틀린다
+(목록의 레이트는 모두 1, 4, 8의 배수라 맞다). la5016은 `options.hardware_divider()`로 실제 분주비를 계산해
+레지스터에 쓰고, `Meta.samplerate`에 실제 레이트를 넣고, 요청과 다르면 경고한다.
+
+**스트리밍 한계.**
+- 분주비 < 8(200·500 MHz)에서는 데이터가 거의 나오지 않는다 → 스트리밍 최대 100 MHz, 그 이상은 사용 오류.
+- 대역폭(레이트 × 활성 채널): 160 Mbps까지는 반복 실행에서 끊김 없음. 200 Mbps는 대부분 되지만 약 1/20 확률로
+  중간에 데이터가 끊김(장비 버퍼 넘침으로 추정). 16 ch × 20 MHz(320 Mbps, 약 40 MB/s)도 한 번 성공했지만 보장 안 됨.
+  sigrok처럼 200 Mbps 이상이면 경고만 한다.
+- 시작·정지 직후 데이터 값은 SDRAM 모드와 같다 (문턱 0.4 V에서 미연결 입력 1, CH0 0).
+
+**macOS libusb.** 데이터가 조금씩 들어오는 동안에는 동기 bulk read의 시간 초과가 동작하지 않는다
+(버퍼가 찰 때까지 블록). 그래서 읽기 크기를 데이터 속도의 약 50 ms 분량(512 B 단위, 최대 512 KiB)으로 정한다.
+pyusb는 시간 초과 시 받은 일부 데이터를 버리므로 이 크기 조정이 데이터 손실도 막는다.
+
+## 18. 구조
+
+```
+Device.stream(cfg) ─ REG_CAPT_MODE=0x01, 트리거 0 → BULK_RESET → BulkReader 시작 → RUN → BULK_START
+   └─ Stream: iter(raw bytes), stop() = HALT + reader 정지
+BulkReader (usb.py): 수신 전용 스레드 + 큐(64 × 읽기 크기). 큐가 차면 overrun, 읽기 시간 초과는 StreamError
+stream.expand(raw, sink, channels, limit) ─ Deinterleaver: 활성 채널마다 u16(16샘플, LSB 먼저), 채널 순서대로
+```
+
+- de-interleave는 numpy (`unpackbits` + 채널 ≤ 4는 시프트, 그 이상은 `packbits`): 1 ch 151 MB/s, 16 ch 62 MB/s
+  (USB 최대 약 40 MB/s보다 빠름).
+- 출력·`-P` 디코더·`-o`는 SDRAM 모드와 같은 Sink를 그대로 쓴다.
+
+## 19. CLI
+
+| 항목 | 동작 |
+|---|---|
+| `-c continuous=on` | on/off/true/false/yes/no/1/0. 기본 samplerate 100 MHz |
+| `-t`, `-w` | 사용 오류 (하드웨어 트리거 없음. sigrok은 조용히 무시) |
+| `--samples` / `--time` | 도달하면 HALT. 둘 다 없으면 Ctrl-C까지 |
+| 첫 Ctrl-C | HALT, 받은 데이터를 모두 출력, 종료 0 |
+| 두 번째 Ctrl-C | 중단, `-o` 삭제, 종료 130 |
+| 스트림 끊김 | 그때까지의 출력은 **남기고** 종료 1, 메시지로 대역폭을 줄이라고 안내 |
+
+## 20. 검증 (2026-10-16)
+
+| 항목 | 결과 |
+|---|---|
+| 값 | 16 ch × 1 MHz: 문턱 0.4 V → 전부 `0xfffe`, 1.4 V → 전부 `0` (SDRAM 모드와 같음) |
+| 실시간성 | 4 ch × 10 MHz 1 s, 1 ch × 100 MHz 1 s: 샘플 수 정확, 0.9–1.5 s 안에 도착 (`pytest -m hw`) |
+| 반복 | 6가지 설정 × 4회: 160 Mbps 이하 24/24 성공, 200 Mbps 11/12 성공 |
+| Ctrl-C | 8 ch × 20 MHz 무한 스트리밍 → 3 s 뒤 SIGINT → 2.8 s 분량 저장, 종료 0 |
+
+**실제 신호로 재확인 (CH0 1 kHz 사인파, 문턱 0.4 V).** 캡처를 `-O binary`로 받아 FFT 기본 주파수를 구했다.
+la5016이 보고한(실제) 레이트로 계산하면 모든 경우 1000.00 Hz:
+
+| 모드 | 요청 → 실제 레이트 | FFT |
+|---|---|---|
+| SDRAM | 1 M, 10 M, 100 M, 500 M (그대로) | 1000.00 Hz |
+| SDRAM | 40 M → 50 M, 8 M → 8.33 M, 400 M → 200 M | 1000.00 Hz (요청값으로 계산했다면 1250 / 1042 / 500 Hz) |
+| 스트리밍 | 1 M (4 ch 3 s / 1 ch 2 s), 10 M (2 s), 100 M (1 s) | 1000.00 Hz |
+| 스트리밍 | 40 M → 50 M (1 s) | 1000.00 Hz |
+
+`timing` 디코더(`format=samples`)로도 SDRAM 1 MHz, 스트리밍 1 MHz 모두 주기 1000샘플이 최빈값.

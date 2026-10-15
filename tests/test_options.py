@@ -334,14 +334,20 @@ def test_samplerate_constants():
 
 
 @pytest.mark.parametrize("requested, divider, eff", [
+    # Hardware rule measured on an LA5016: 1, 4, or a multiple of 8.
     (500_000_000, 1, 500_000_000),
-    (300_000_000, 2, 400_000_000),
+    (400_000_000, 4, 200_000_000),     # divider 2 runs at 200 MHz
+    (300_000_000, 4, 200_000_000),
     (200_000_000, 4, 200_000_000),
+    (160_000_000, 4, 200_000_000),     # divider 5
     (100_000_000, 8, 100_000_000),
+    (80_000_000, 8, 100_000_000),      # divider 10
+    (40_000_000, 16, 50_000_000),      # divider 20
+    (8_000_000, 96, 8_333_333),        # divider 100
     (1_000_000, 800, 1_000_000),
     (20_000, 40_000, 20_000),
-    (12_208, 65_530, 12_208),
-    (3_000_000, 266, 3_007_518),
+    (12_208, 65_528, 12_208),
+    (3_000_000, 264, 3_030_303),
 ])
 def test_effective_samplerate(requested, divider, eff):
     assert samplerate_divider(requested) == divider
@@ -357,11 +363,10 @@ def test_samplerate_out_of_range(requested):
 
 
 def test_samplerate_list():
-    assert SAMPLERATE_LIST == (
+    assert SAMPLERATE_LIST == (   # sigrok rates_500mhz
         20_000, 50_000, 100_000, 200_000, 500_000,
-        1_000_000, 2_000_000, 4_000_000, 5_000_000, 8_000_000, 10_000_000,
-        20_000_000, 25_000_000, 40_000_000, 50_000_000, 80_000_000,
-        100_000_000, 160_000_000, 200_000_000, 400_000_000, 500_000_000)
+        1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000,
+        100_000_000, 200_000_000, 500_000_000)
     assert all(isinstance(r, int) for r in SAMPLERATE_LIST)
     # Every listed rate is exactly reachable.
     assert all(effective_samplerate(r) == r for r in SAMPLERATE_LIST)
@@ -394,7 +399,17 @@ def test_parse_samples_invalid(text):
 # --- parse_config -----------------------------------------------------------
 
 def test_config_keys():
-    assert CONFIG_KEYS == {"samplerate", "captureratio", "voltage_threshold"}
+    assert CONFIG_KEYS == {"samplerate", "captureratio", "voltage_threshold", "continuous"}
+
+
+@pytest.mark.parametrize("text, value", [("on", True), ("off", False), ("TRUE", True), ("0", False)])
+def test_continuous(text, value):
+    assert parse_config(["continuous=" + text]) == {"continuous": value}
+
+
+def test_continuous_invalid():
+    with pytest.raises(UsageError):
+        parse_config(["continuous=maybe"])
 
 
 def test_parse_config_empty():

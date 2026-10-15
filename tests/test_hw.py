@@ -75,3 +75,32 @@ def test_edge_trigger(dev, cond, before, after):
     k = sink.trigger_at
     assert k is not None
     assert (x[k - 1] & 1, x[k] & 1) == (before, after)
+
+
+@pytest.mark.parametrize("rate, mask", [(10_000_000, 0xF), (100_000_000, 0x1)])  # 40 and 100 Mbps; 200 Mbps breaks off now and then
+def test_stream_runs_in_real_time(dev, rate, mask):
+    import time
+    from la5016 import stream as lstream
+    st = dev.stream(CaptureConfig(samplerate=rate, channel_mask=mask, threshold=THRESHOLD))
+    sink = Collect()
+    t = time.time()
+    try:
+        stats = lstream.expand(st, sink, st.channels, limit_samples=rate)   # one second
+    finally:
+        st.stop()
+    dt = time.time() - t
+    assert stats.samples == rate
+    assert 0.9 < dt < 1.5     # data arrives at the sampling rate, not faster
+
+
+@pytest.mark.parametrize("requested, actual", [(40_000_000, 50_000_000), (400_000_000, 200_000_000)])
+def test_divider_rounding_matches_hardware(dev, requested, actual):
+    import time
+    n = actual // 2
+    t = time.time()
+    cap = dev.capture(CaptureConfig(samplerate=requested, limit_samples=n))
+    dt = time.time() - t
+    for _ in cap.chunks:
+        pass
+    assert cap.samplerate == actual
+    assert dt == pytest.approx(0.5, rel=0.25)

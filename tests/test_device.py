@@ -143,3 +143,31 @@ def test_close_halts_and_keeps_fpga():
     assert t.writes(d.REG_RUN) == [bytes([d.RUNMODE_HALT])]
     assert not [e for e in t.log if e[1] == d.CMD_FPGA_ENABLE]
     assert t.closed
+
+
+def test_stream_setup_order_and_read_size():
+    t = FakeTransport()
+    dev = d.Device(t)
+    st = dev.stream(d.CaptureConfig(samplerate=10_000_000, channel_mask=0b1011, threshold=1.4))
+    assert st.samplerate == 10_000_000 and st.channels == [0, 1, 3]
+    assert t.writes(d.REG_CAPT_MODE) == [bytes([d.CAPTMODE_STREAM])]
+    _, enabled, level, high = struct.unpack("<IIII", t.writes(d.REG_TRIGGER)[0])
+    assert (enabled, level, high) == (0, 0, 0)
+    kinds = [(e[0], e[1], e[2]) for e in t.log if e[0] in ("out", "bulk_reader")]
+    i_reset = kinds.index(("out", d.CMD_BULK_RESET, 0))
+    i_reader = [k[0] for k in kinds].index("bulk_reader")
+    i_run = kinds.index(("out", d.CMD_FPGA_SPI, d.REG_RUN))
+    i_start = kinds.index(("out", d.CMD_BULK_START, 0))
+    assert i_reset < i_reader < i_run < i_start
+    reader = [e for e in t.log if e[0] == "bulk_reader"][0]
+    # 3 ch x 10 MHz = 3.75 MB/s -> about 50 ms per read, a multiple of 512
+    assert reader[2] % 512 == 0 and 150_000 < reader[2] < 200_000
+    st.stop()
+    assert t.writes(d.REG_RUN)[-1] == bytes([d.RUNMODE_HALT])
+
+
+def test_stream_rejects_trigger_and_fast_rates():
+    with pytest.raises(d.DeviceError):
+        d.Device(FakeTransport()).stream(d.CaptureConfig(samplerate=200_000_000, channel_mask=1))
+    with pytest.raises(d.DeviceError):
+        d.Device(FakeTransport()).stream(d.CaptureConfig(samplerate=1_000_000, triggers={0: "r"}))

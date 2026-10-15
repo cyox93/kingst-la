@@ -11,7 +11,7 @@ from typing import BinaryIO, List, Optional
 
 import numpy as np
 
-from la5016 import __version__, firmware, options, output, rle
+from la5016 import __version__, firmware, options, output, rle, stream
 from la5016.options import UsageError
 from la5016.pipeline import Channel, Meta, Sink
 
@@ -209,6 +209,39 @@ def _rate_str(rate: int) -> str:
     return "%d Hz" % rate
 
 
+def _stream(dev, cfg, channels: List[Channel], sink, limit: Optional[int], intr: "_Interrupts") -> None:
+    """Streaming capture: samples flow to the sink while the device keeps sampling."""
+    st = dev.stream(cfg)
+    try:
+        sink.begin(Meta(st.samplerate, channels))
+
+        def chunks():
+            for raw in st:
+                yield raw
+                if intr.stop:
+                    st.stop()   # first Ctrl-C: halt, then drain what is in flight
+
+        from la5016.usb import StreamError
+        broken = None
+        try:
+            stats = stream.expand(chunks(), sink, st.channels, limit_samples=limit)
+            samples = stats.samples
+        except StreamError as e:
+            broken = e
+        st.stop()
+        intr.sampling = False
+        sink.end()   # what arrived before a break-off is still valid output
+        if broken is not None:
+            raise _Incomplete(str(broken))
+        log.info("%d samples streamed (%d bytes)", samples, st.bytes)
+    finally:
+        st.stop()
+
+
+class _Incomplete(Exception):
+    """Capture ended early; the output written so far is kept."""
+
+
 def _decoder_sink(args, channels: List[Channel], out: BinaryIO):
     """-P: decoder stacks replace the logic output, as in sigrok-cli."""
     import io
@@ -303,7 +336,12 @@ def cmd_capture(args, open_device=None) -> int:
     else:
         fmt, fmt_opts = "bits", {}
 
-    rate = cfg_in.get("samplerate", options.MAX_SAMPLERATE)
+    continuous = cfg_in.get("continuous", False)
+    rate = cfg_in.get("samplerate", options.STREAM_MAX_SAMPLERATE if continuous else options.MAX_SAMPLERATE)
+    if continuous and triggers:
+        raise UsageError("streaming (continuous=on) has no hardware trigger; drop -t")
+    if continuous and options.effective_samplerate(rate) > options.STREAM_MAX_SAMPLERATE:
+        raise UsageError("streaming works up to %s" % _rate_str(options.STREAM_MAX_SAMPLERATE))
     eff = options.effective_samplerate(rate)
     if eff != rate:
         log.warning("samplerate %s runs at %s", _rate_str(rate), _rate_str(eff))
@@ -319,6 +357,7 @@ def cmd_capture(args, open_device=None) -> int:
         threshold=cfg_in.get("voltage_threshold", options.DEFAULT_THRESHOLD),
         channel_mask=sum(1 << c.index for c in channels),
         triggers=triggers,
+        continuous=continuous,
     )
 
     out: BinaryIO
@@ -342,15 +381,21 @@ def cmd_capture(args, open_device=None) -> int:
         with _Interrupts() as intr:
             dev = open_device(_conn(args))
             intr.sampling = True
-            cap = dev.capture(cfg, should_stop=lambda: intr.stop)
-            intr.sampling = False
-            sink.begin(Meta(cap.samplerate, channels))
-            stats = rle.expand(cap.chunks, sink, trigger_packets=cap.trigger_packets, limit_samples=limit)
-            sink.end()
-            if stats.seq_breaks:
-                log.warning("%d sequence number breaks in capture data", stats.seq_breaks)
-            log.info("%d samples", stats.samples)
+            if continuous:
+                _stream(dev, cfg, channels, sink, limit, intr)
+            else:
+                cap = dev.capture(cfg, should_stop=lambda: intr.stop)
+                intr.sampling = False
+                sink.begin(Meta(cap.samplerate, channels))
+                stats = rle.expand(cap.chunks, sink, trigger_packets=cap.trigger_packets, limit_samples=limit)
+                sink.end()
+                if stats.seq_breaks:
+                    log.warning("%d sequence number breaks in capture data", stats.seq_breaks)
+                log.info("%d samples", stats.samples)
             ok = True
+    except _Incomplete:
+        ok = True
+        raise
     finally:
         if not ok and hasattr(sink, "abort"):
             sink.abort()

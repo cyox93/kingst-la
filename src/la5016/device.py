@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterator, Optional
 
 from la5016 import firmware
+from la5016.options import effective_samplerate, hardware_divider
 from la5016.usb import EP_BITSTREAM, EP_CAPTURE, Transport
 
 log = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ REG_TRIGGER = 0x20
 REG_THRESHOLD = 0x68
 
 CAPTMODE_TO_RAM = 0x00
+CAPTMODE_STREAM = 0x01
 RUNMODE_HALT = 0x00
 RUNMODE_RUN = 0x03
 
@@ -46,6 +48,7 @@ BULK_CHUNK = 512 * 1024
 POLL_INTERVAL = 0.05
 
 NUM_SAMPLES_MAX = 10 * 1000 * 1000 * 1000
+STREAM_MBPS_MAX = 200       # USB stream bandwidth limit (samplerate x enabled channels)
 BASECLOCK = 800_000_000
 MAX_SAMPLERATE = 500_000_000
 MEMORY_BITS = 2  # Gbit
@@ -95,6 +98,7 @@ class CaptureConfig:
     threshold: float = 1.4
     channel_mask: int = 0xFFFF
     triggers: Dict[int, str] = field(default_factory=dict)  # bit -> '0' '1' 'r' 'f'
+    continuous: bool = False                  # streaming mode: no hardware trigger, no memory limit
 
 
 @dataclass
@@ -160,7 +164,7 @@ def sample_registers(samplerate: int, limit_samples: Optional[int], captureratio
                      trigger_involved: bool) -> bytes:
     if samplerate > MAX_SAMPLERATE:
         raise DeviceError("samplerate too high: %d" % samplerate)
-    divider = BASECLOCK // samplerate
+    divider = hardware_divider(BASECLOCK // samplerate)
     if not 1 <= divider <= 0xFFFF:
         raise DeviceError("samplerate too low: %d" % samplerate)
     limit = min(limit_samples or NUM_SAMPLES_MAX, NUM_SAMPLES_MAX)
@@ -172,10 +176,6 @@ def sample_registers(samplerate: int, limit_samples: Optional[int], captureratio
     pre_memory = max(pre_memory, 0x100)
     return (limit.to_bytes(5, "little") + pre_samples.to_bytes(5, "little")
             + (pre_memory >> 8).to_bytes(3, "little") + struct.pack("<HB", divider, 0))
-
-
-def effective_samplerate(samplerate: int) -> int:
-    return min(BASECLOCK // (BASECLOCK // samplerate), MAX_SAMPLERATE)
 
 
 class Device:
@@ -269,9 +269,11 @@ class Device:
     def configure(self, cfg: CaptureConfig) -> bool:
         """Write threshold, capture mode, trigger and sampling setup. Returns trigger_involved."""
         self._spi_write(REG_THRESHOLD, threshold_registers(cfg.threshold))
-        self._spi_write(REG_CAPT_MODE, bytes([CAPTMODE_TO_RAM]))
+        self._spi_write(REG_CAPT_MODE, bytes([CAPTMODE_STREAM if cfg.continuous else CAPTMODE_TO_RAM]))
         if not cfg.channel_mask:
             raise DeviceError("need at least one enabled channel")
+        if cfg.continuous and cfg.triggers:
+            raise DeviceError("streaming mode has no hardware trigger")
         self._spi_write(REG_TRIGGER, trigger_registers(cfg.channel_mask, cfg.triggers), index=16)
         involved = bool(cfg.triggers)
         self._spi_write(REG_SAMPLING, sample_registers(cfg.samplerate, cfg.limit_samples,
@@ -326,12 +328,60 @@ class Device:
             chunks=self.t.bulk_read_stream(EP_CAPTURE, nbytes, BULK_CHUNK),
         )
 
+    def stream(self, cfg: CaptureConfig) -> "Stream":
+        """Start a streaming capture; iterate the result for raw interleaved data, then stop() it."""
+        cfg = CaptureConfig(**{**cfg.__dict__, "continuous": True})
+        nch = bin(cfg.channel_mask).count("1")
+        if hardware_divider(BASECLOCK // cfg.samplerate) < 8:
+            raise DeviceError("streaming works up to 100 MHz (divider 8); no data comes at higher rates")
+        rate = effective_samplerate(cfg.samplerate)
+        mbps = rate * nch // 1_000_000
+        if mbps >= STREAM_MBPS_MAX:
+            log.warning("high USB stream bandwidth: %d Mbps (limit about %d)", mbps, STREAM_MBPS_MAX)
+        self.configure(cfg)
+        # Read about 50 ms of data per transfer: pyusb drops partial data on a timeout.
+        bytes_per_s = max(1, rate * nch // 8)
+        chunk = min(BULK_CHUNK, max(512, bytes_per_s // 20 // 512 * 512))
+        timeout_ms = max(1000, int(4000 * chunk / bytes_per_s))
+        self.t.ctrl_out(CMD_BULK_RESET, 0, 0)
+        reader = self.t.bulk_reader(EP_CAPTURE, chunk, timeout_ms).start()
+        # sigrok: run mode and bulk start must follow the submitted reads closely.
+        self.set_run_mode(RUNMODE_RUN)
+        self.t.ctrl_out(CMD_BULK_START, 0, 0)
+        log.info("streaming %d channel(s) at %d Hz (%d Mbps), %d-byte reads", nch, rate, mbps, chunk)
+        return Stream(self, reader, rate, [i for i in range(16) if cfg.channel_mask >> i & 1])
+
     def close(self) -> None:
         try:
             self.set_run_mode(RUNMODE_HALT)
         except Exception as e:
             log.debug("halt on close failed: %s", e)
         self.t.close()
+
+
+class Stream:
+    def __init__(self, dev: Device, reader, samplerate: int, channels):
+        self.dev = dev
+        self.reader = reader
+        self.samplerate = samplerate
+        self.channels = channels
+        self._stopped = False
+
+    def __iter__(self):
+        return iter(self.reader)
+
+    def stop(self) -> None:
+        """Halt sampling; iteration ends once the data still in flight is drained."""
+        if not self._stopped:
+            self._stopped = True
+            try:
+                self.dev.set_run_mode(RUNMODE_HALT)
+            finally:
+                self.reader.stop()
+
+    @property
+    def bytes(self) -> int:
+        return self.reader.bytes
 
 
 def open_device(conn=None, load_firmware: Callable[[str], bytes] = firmware.load) -> Device:

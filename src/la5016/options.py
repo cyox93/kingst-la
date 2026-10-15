@@ -29,15 +29,17 @@ BASECLOCK = 800_000_000
 MAX_SAMPLERATE = 500_000_000
 MIN_SAMPLERATE = -(-BASECLOCK // 0xFFFF)  # smallest rate whose divider fits the 16-bit register
 
-# Convenience list shown by --show (same 1-2-5 style as sigrok);
-# any rate between MIN_SAMPLERATE and MAX_SAMPLERATE is accepted.
+# The rates listed by --show, as in sigrok's rates_500mhz table. Any rate
+# between MIN_SAMPLERATE and MAX_SAMPLERATE is accepted and rounded to what
+# the hardware can do (see hardware_divider()).
 SAMPLERATE_LIST = tuple(int(r) for r in (
     20e3, 50e3, 100e3, 200e3, 500e3,
-    1e6, 2e6, 4e6, 5e6, 8e6, 10e6, 20e6, 25e6, 40e6, 50e6, 80e6,
-    100e6, 160e6, 200e6, 400e6, 500e6,
+    1e6, 2e6, 5e6, 10e6, 20e6, 50e6,
+    100e6, 200e6, 500e6,
 ))
+STREAM_MAX_SAMPLERATE = 100_000_000
 
-CONFIG_KEYS = {"samplerate", "captureratio", "voltage_threshold"}
+CONFIG_KEYS = {"samplerate", "captureratio", "voltage_threshold", "continuous"}
 
 TRIGGER_CONDITIONS = ("0", "1", "r", "f")
 
@@ -223,18 +225,41 @@ def parse_threshold(text: str) -> float:
         f"{', '.join(str(t) for t in THRESHOLDS)}")
 
 
+def hardware_divider(divider: int) -> int:
+    """The divider the LA5016 actually applies.
+
+    Measured on hardware (2026-10-16): 1 gives 500 MHz, 2..7 all give
+    200 MHz (divider 4), and larger values are rounded down to a multiple
+    of 8. libsigrok assumes any divider works.
+    """
+    if divider <= 1:
+        return 1
+    if divider < 8:
+        return 4
+    return divider & ~7
+
+
 def samplerate_divider(requested: int) -> int:
     """Divider of BASECLOCK the hardware uses for the requested rate."""
     if not MIN_SAMPLERATE <= requested <= MAX_SAMPLERATE:
         raise UsageError(
             f"samplerate {requested} Hz out of range: "
             f"{MIN_SAMPLERATE} Hz .. {MAX_SAMPLERATE} Hz")
-    return BASECLOCK // requested
+    return hardware_divider(BASECLOCK // requested)
 
 
 def effective_samplerate(requested: int) -> int:
     """Rate the hardware actually runs at for the requested rate."""
     return min(BASECLOCK // samplerate_divider(requested), MAX_SAMPLERATE)
+
+
+def parse_bool(text: str, what: str = "value") -> bool:
+    t = text.strip().lower()
+    if t in ("on", "true", "yes", "1"):
+        return True
+    if t in ("off", "false", "no", "0"):
+        return False
+    raise UsageError(f"invalid {what} '{text}': expected on or off")
 
 
 def parse_captureratio(text: str) -> int:
@@ -273,6 +298,8 @@ def parse_config(text_list: List[str]) -> dict:
             out[key] = parse_captureratio(value)
         elif key == "voltage_threshold":
             out[key] = parse_threshold(value)
+        elif key == "continuous":
+            out[key] = parse_bool(value, key)
         else:
             raise UsageError(
                 f"unknown config key '{key}': expected one of {', '.join(sorted(CONFIG_KEYS))}")

@@ -33,7 +33,7 @@ la5016 -c samplerate=500m -o cap.vcd     # no limit: stops when memory is full o
 | Option | |
 |---|---|
 | `-d kingst-la2016[:conn=BUS.ADDR]` | device; optional with one analyzer attached |
-| `-c samplerate=…` | 12.2 kHz–500 MHz, default 500 MHz; runs at `800 MHz / (800 MHz // rate)` |
+| `-c samplerate=…` | 12.2 kHz–500 MHz, default 500 MHz. The hardware divides 800 MHz by 1, 4 or a multiple of 8, so other rates are rounded down (a warning tells the actual rate) |
 | `-c captureratio=…` | pre-trigger share in %, default 50 |
 | `-c voltage_threshold=x-x` | 0.4, 0.6, 0.9, 1.2, 1.4, 2.0, 2.5, 4.0 V; default 1.4 |
 | `--samples N` / `--time T` | `T` in ms, or with `ms`/`s` |
@@ -62,6 +62,18 @@ The decoders are libsigrokdecode's own Python files, run unmodified by a pure Py
 `sigrokdecode` engine (no libsigrokdecode build needed). With `-P` the logic output is
 replaced by decoder output, as in sigrok-cli. `--protocol-decoder-samplenum` prefixes each
 annotation with its sample range; `-l 3`/`-l 4` add quotes, class ids and short texts.
+
+### Streaming
+
+```sh
+la5016 -c continuous=on:samplerate=10m -C CH0-CH3 -o long.vcd        # until Ctrl-C
+la5016 -c continuous=on:samplerate=1m --time 60s -P uart:rx=CH0:baudrate=9600
+```
+
+Streaming sends samples while the device keeps sampling, so a capture can be longer than the
+device memory. It has no hardware trigger, runs up to 100 MHz, and samplerate × channels should
+stay at or below about 160 Mbps (200 Mbps mostly works but sometimes breaks off; the output up
+to that point is kept and the exit code is 1).
 
 Ctrl-C while sampling stops the capture and still writes what was sampled.
 A second Ctrl-C, or one during the download, aborts (exit 130) and removes the `-o` file.
