@@ -7,6 +7,7 @@ Only the LA5016 entries and the SDRAM capture mode are carried over.
 
 from __future__ import annotations
 
+import json
 import logging
 import struct
 import time
@@ -33,6 +34,8 @@ REG_BULK = 0x08
 REG_SAMPLING = 0x10
 REG_TRIGGER = 0x20
 REG_THRESHOLD = 0x68
+REG_PWM1 = 0x70
+REG_PWM2 = 0x78
 
 CAPTMODE_TO_RAM = 0x00
 CAPTMODE_STREAM = 0x01
@@ -52,6 +55,11 @@ STREAM_MBPS_MAX = 200       # USB stream bandwidth limit (samplerate x enabled c
 BASECLOCK = 800_000_000
 MAX_SAMPLERATE = 500_000_000
 MEMORY_BITS = 2  # Gbit
+
+PWM_CLOCK = 200_000_000
+PWM_MAX_FREQ = 20_000_000
+PWM_MIN_FREQ = PWM_CLOCK / 0xFFFFFFFF
+PWM_DEFAULTS = ((1_000.0, 50.0), (100_000.0, 50.0))   # sigrok's PWM1 / PWM2 defaults
 
 # 16-channel memory layout: 5 x (u16 pins, u8 repeat) + u8 sequence per 16 bytes.
 TRANSFER_SIZE = 16
@@ -107,6 +115,10 @@ class Capture:
     trigger_packets: Optional[int]      # RLE packets before the trigger, None without trigger
     nbytes: int
     chunks: Iterator[bytes]
+
+
+def pwm_state_file():
+    return firmware.firmware_dir().parent / "pwm.json"
 
 
 def lookup_model(magic: int, magic2: int) -> Optional[str]:
@@ -178,6 +190,21 @@ def sample_registers(samplerate: int, limit_samples: Optional[int], captureratio
             + (pre_memory >> 8).to_bytes(3, "little") + struct.pack("<HB", divider, 0))
 
 
+def pwm_registers(freq: float, duty: float) -> tuple:
+    """(period, high time) in 200 MHz clocks, rounded like sigrok's set_pwm_config()."""
+    if not PWM_MIN_FREQ <= freq <= PWM_MAX_FREQ:
+        raise DeviceError("PWM frequency must be %.3g Hz .. 20 MHz" % PWM_MIN_FREQ)
+    if not 0 < duty <= 100:
+        raise DeviceError("PWM duty cycle must be > 0 and <= 100 %")
+    period = int(PWM_CLOCK / freq)
+    high = int(period * duty / 100.0 + 0.5)
+    return period, high
+
+
+def pwm_actual(period: int, high: int) -> tuple:
+    return PWM_CLOCK / period, 100.0 * high / period
+
+
 class Device:
     def __init__(self, transport: Transport):
         self.t = transport
@@ -224,14 +251,19 @@ class Device:
         return self.identity
 
     def fpga_ready(self) -> bool:
-        """sigrok check_fpga_bitstream(): can the loaded bitstream be reused?"""
+        """sigrok check_fpga_bitstream(): can the loaded bitstream be reused?
+
+        sigrok also requires REG_PWM_EN to read 0; on the LA5016 that register
+        is write-only and always reads 0, so the check is dropped. A generator
+        set up by an earlier `--set` keeps running while later commands capture.
+        """
         try:
             if self.t.ctrl_in(CMD_FPGA_INIT, 0, 0, 1)[0] != 0:
                 return False
             state = self.run_state()
             if state and ((state & 0x3) != 0x1 or (state & ~0xF) != 0x85E0):
                 return False
-            return (self._spi_read(REG_PWM_EN, 1)[0] & 0x3) == 0
+            return True
         except Exception as e:
             log.debug("FPGA check failed: %s", e)
             return False
@@ -256,6 +288,7 @@ class Device:
         ident = self.identity or self.identify()
         if not self.fpga_ready():
             self.upload_bitstream(load_bitstream(ident.bitstream))
+            self.reset_pwm_state()   # a fresh bitstream starts with both PWM outputs off
         else:
             log.info("reusing loaded FPGA bitstream")
         self.enable_bitstream()
@@ -263,6 +296,52 @@ class Device:
         if state & 0xFFF0 != 0x85E0:
             log.warning("unexpected run state %#06x, want 0x85eX", state)
         self.t.ctrl_out(CMD_BULK_RESET, 0, 0)
+
+    # --- PWM outputs -----------------------------------------------------
+
+    # The PWM registers are write-only (they read back as 0), so the last
+    # settings are kept in a small state file. A fresh FX2 firmware or FPGA
+    # bitstream load stops both outputs and clears it.
+
+    def pwm_state(self) -> list:
+        """[(enabled, freq, duty), (…)] for PWM1 and PWM2 as last set by la5016."""
+        try:
+            data = json.loads(pwm_state_file().read_text())
+            return [tuple(x) for x in data["pwm"]][:2]
+        except (OSError, ValueError, KeyError, TypeError):
+            return [(False,) + PWM_DEFAULTS[0], (False,) + PWM_DEFAULTS[1]]
+
+    def _save_pwm_state(self, state) -> None:
+        try:
+            f = pwm_state_file()
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps({"pwm": [list(x) for x in state]}))
+        except OSError as e:
+            log.warning("cannot save PWM state: %s", e)
+
+    def reset_pwm_state(self) -> None:
+        self._save_pwm_state([(False,) + PWM_DEFAULTS[0], (False,) + PWM_DEFAULTS[1]])
+
+    def set_pwm(self, idx: int, enabled: bool, freq: float = None, duty: float = None) -> tuple:
+        """Configure PWM1 (idx 0) or PWM2 (idx 1), as sigrok's set_pwm_config().
+
+        The other output keeps its last settings. Returns the actual (freq, duty).
+        """
+        if idx not in (0, 1):
+            raise DeviceError("no PWM%d" % (idx + 1))
+        state = self.pwm_state()
+        _, sfreq, sduty = state[idx]
+        freq = sfreq if freq is None else freq
+        duty = sduty if duty is None else duty
+        period, high = pwm_registers(freq, duty)
+        others = sum(1 << i for i, (on, _, _) in enumerate(state) if on and i != idx)
+        self._spi_write(REG_PWM_EN, bytes([others]))      # off before the parameters change
+        state[idx] = (bool(enabled), freq, duty)
+        if enabled:
+            self._spi_write((REG_PWM1, REG_PWM2)[idx], struct.pack("<II", period, high))
+            self._spi_write(REG_PWM_EN, bytes([others | 1 << idx]))
+        self._save_pwm_state(state)
+        return pwm_actual(period, high) if enabled else None
 
     # --- capture ---------------------------------------------------------
 
@@ -342,7 +421,7 @@ class Device:
         # Read about 50 ms of data per transfer: pyusb drops partial data on a timeout.
         bytes_per_s = max(1, rate * nch // 8)
         chunk = min(BULK_CHUNK, max(512, bytes_per_s // 20 // 512 * 512))
-        timeout_ms = max(1000, int(4000 * chunk / bytes_per_s))
+        timeout_ms = max(250, int(4000 * chunk / bytes_per_s))
         self.t.ctrl_out(CMD_BULK_RESET, 0, 0)
         reader = self.t.bulk_reader(EP_CAPTURE, chunk, timeout_ms).start()
         # sigrok: run mode and bulk start must follow the submitted reads closely.
@@ -371,13 +450,19 @@ class Stream:
         return iter(self.reader)
 
     def stop(self) -> None:
-        """Halt sampling; iteration ends once the data still in flight is drained."""
+        """Halt sampling and wait for the reader thread to end.
+
+        The thread must be gone before the next capture: a read still pending
+        on EP6 would otherwise swallow the next download's data.
+        """
         if not self._stopped:
             self._stopped = True
             try:
                 self.dev.set_run_mode(RUNMODE_HALT)
             finally:
                 self.reader.stop()
+                if not self.reader.join(self.reader.timeout_ms / 1000 + 2):
+                    log.warning("USB reader thread did not stop; reopen the device before capturing again")
 
     @property
     def bytes(self) -> int:

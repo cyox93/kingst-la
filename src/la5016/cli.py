@@ -36,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-c", "--config", action="append", default=[], metavar="KEY=VAL[:...]",
                    help="samplerate, captureratio, voltage_threshold")
     p.add_argument("-C", "--channels", metavar="LIST", help="e.g. CH0,CH3-CH5,CH7=SDA")
+    p.add_argument("-g", "--channel-group", metavar="GROUP",
+                   help="PWM1 or PWM2: -c then sets enabled, output_frequency, duty_cycle")
+    p.add_argument("--set", action="store_true", help="apply the -g settings and exit")
     p.add_argument("-t", "--triggers", metavar="LIST", help="e.g. CH0=r,CH1=1 (0, 1, r, f)")
     p.add_argument("-w", "--wait-trigger", action="store_true", help="drop samples before the trigger")
     p.add_argument("-o", "--output-file", metavar="FILE")
@@ -160,6 +163,39 @@ def cmd_show_decoders(args, out) -> int:
     return 0
 
 
+def cmd_set_pwm(args, out, open_device=None) -> int:
+    idx = options.parse_channel_group(args.channel_group)
+    cfg = options.parse_pwm_config(args.config)
+    if not cfg:
+        raise UsageError("nothing to set: give -c enabled=on|off, output_frequency=, duty_cycle=")
+    # Giving a frequency or duty implies "on"; the generator keeps running after exit.
+    enabled = cfg.get("enabled", True)
+    if open_device is None:
+        from la5016.device import open_device
+    from la5016.device import DeviceError
+    dev = open_device(_conn(args))
+    try:
+        try:
+            actual = dev.set_pwm(idx, enabled, cfg.get("output_frequency"), cfg.get("duty_cycle"))
+        except DeviceError as e:
+            raise UsageError(str(e)) from None
+    finally:
+        dev.close()
+    name = options.PWM_GROUPS[idx]
+    if actual is None:
+        out.write("%s: off\n" % name)
+    else:
+        out.write("%s: on, %s, duty %.4g %%\n" % (name, _freq_str(actual[0]), actual[1]))
+    return 0
+
+
+def _freq_str(f: float) -> str:
+    for div, unit in ((1e6, "MHz"), (1e3, "kHz")):
+        if f >= div:
+            return "%.6g %s" % (f / div, unit)
+    return "%.6g Hz" % f
+
+
 def cmd_scan(args, out) -> int:
     from la5016.device import open_device
     dev = open_device(_conn(args))
@@ -194,6 +230,10 @@ def cmd_show(args, out) -> int:
         out.write("    voltage_threshold: %s\n" % ", ".join(
             "%.1f-%.1f%s" % (v, v, " (current)" if v == options.DEFAULT_THRESHOLD else "")
             for v in options.THRESHOLDS))
+        out.write("Channel groups (PWM state as last set by la5016):\n")
+        for name, (on, freq, duty) in zip(options.PWM_GROUPS, dev.pwm_state()):
+            out.write("    %s: %s, output_frequency %s, duty_cycle %.4g %%\n"
+                      % (name, "on" if on else "off", _freq_str(freq), duty))
     finally:
         dev.close()
     return 0
@@ -430,6 +470,13 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
             raise UsageError("-A/-B need protocol decoders (-P)")
         if args.show and args.protocol_decoders:
             return cmd_show_decoders(args, sys.stdout)
+        if args.channel_group:
+            if not args.set:
+                raise UsageError("-g %s needs --set (configure the generator, then capture in a "
+                                 "separate command)" % args.channel_group)
+            return cmd_set_pwm(args, sys.stdout, open_device)
+        if args.set:
+            raise UsageError("--set needs -g PWM1 or -g PWM2")
         if args.driver:
             name, _ = options.parse_driver(args.driver)
         if args.scan:

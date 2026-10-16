@@ -91,6 +91,8 @@ class FakeTransport:
 
 
 class FakeReader:
+    timeout_ms = 250
+
     def __init__(self, chunks, error=None):
         self.chunks = list(chunks)
         self.error = error
@@ -114,4 +116,4 @@ class FakeReader:
         self.stopped = True
 
     def join(self, timeout=5):
-        pass
+        return True

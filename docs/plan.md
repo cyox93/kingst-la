@@ -53,3 +53,13 @@
 | 3 | 장치 시작/정지 | `device.py` `Device.stream`, `Stream` | FakeTransport 순서 테스트 |
 | 4 | CLI | `cli.py` `-c continuous=on` | 가짜 장치 end-to-end, 끊김 시 출력 유지 |
 | 5 | 실기 | `tests/test_hw.py` | 실시간성, 분주비 규칙 |
+
+---
+
+# 4차 구현 계획 — PWM 출력
+
+| # | 작업 | 파일 | 검증 |
+|---|---|---|---|
+| 1 | 레지스터 계산·설정 순서·상태 파일 | `device.py` `pwm_registers`, `set_pwm`, `pwm.json` | FakeTransport |
+| 2 | `-g`/`--set`, `--show` PWM 상태 | `options.py`, `cli.py` | 가짜 장치 end-to-end |
+| 3 | 루프백 | `tests/test_hw.py` (`LA5016_TEST_PWM=1|2`, PWMx → CH0) | 주파수·duty, 스트리밍 연속성 |

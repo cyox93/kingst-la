@@ -219,3 +219,28 @@ def test_stream_default_samplerate_is_100m(capsysbinary):
     assert cli.main(["-c", "continuous=on", "--samples", "16", "-C", "CH0", "-O", "vcd"],
                     open_device=_opener(t)) == 0
     assert b"at 100 MHz" in capsysbinary.readouterr().out
+
+
+# --- PWM (-g PWMx -c ... --set) ----------------------------------------------
+
+def test_pwm_set_and_off(capsys):
+    t = FakeTransport()
+    assert cli.main(["-g", "PWM1", "-c", "output_frequency=1k:duty_cycle=25%", "--set"],
+                    open_device=_opener(t)) == 0
+    assert capsys.readouterr().out == "PWM1: on, 1 kHz, duty 25 %\n"
+    assert t.writes(d.REG_PWM1) == [__import__("struct").pack("<II", 200_000, 50_000)]
+    assert cli.main(["-g", "PWM1", "-c", "enabled=off", "--set"], open_device=_opener(t)) == 0
+    assert capsys.readouterr().out == "PWM1: off\n"
+
+
+@pytest.mark.parametrize("argv", [
+    ["-g", "PWM1", "-c", "output_frequency=1k"],                    # no --set
+    ["--set", "-c", "samplerate=1m"],                               # no -g
+    ["-g", "PWM3", "-c", "enabled=on", "--set"],
+    ["-g", "PWM1", "-c", "speed=3", "--set"],
+    ["-g", "PWM1", "-c", "output_frequency=30m", "--set"],
+    ["-g", "PWM1", "-c", "duty_cycle=0", "--set"],
+    ["-g", "PWM1", "--set"],
+])
+def test_pwm_usage_errors(argv):
+    assert cli.main(argv, open_device=_opener(FakeTransport())) == 1

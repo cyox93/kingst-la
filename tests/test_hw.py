@@ -104,3 +104,43 @@ def test_divider_rounding_matches_hardware(dev, requested, actual):
         pass
     assert cap.samplerate == actual
     assert dt == pytest.approx(0.5, rel=0.25)
+
+
+# PWM loopback: wire a PWM output to CH0 and set LA5016_TEST_PWM to 1 or 2.
+PWM = int(os.environ.get("LA5016_TEST_PWM", "0"))
+needs_pwm = pytest.mark.skipif(PWM not in (1, 2), reason="wire PWM1 or PWM2 to CH0, set LA5016_TEST_PWM")
+
+
+@needs_pwm
+@pytest.mark.parametrize("freq, duty, rate", [(1_000, 25, 1_000_000), (123_400, 10, 100_000_000),
+                                              (1_000_000, 50, 100_000_000), (20_000_000, 50, 500_000_000)])
+def test_pwm_loopback(dev, freq, duty, rate):
+    actual_f, actual_d = dev.set_pwm(PWM - 1, True, freq, duty)
+    try:
+        _, _, _, x = _capture(dev, samplerate=rate, limit_samples=200_000, channel_mask=1)
+    finally:
+        dev.set_pwm(PWM - 1, False)
+    ch0 = (x & 1).astype(np.int8)
+    rises = np.flatnonzero(np.diff(ch0) == 1)
+    period = np.diff(rises).mean()
+    assert rate / period == pytest.approx(actual_f, rel=1e-3)
+    high = ch0[rises[0] + 1:rises[-1] + 1].mean()
+    assert high == pytest.approx(actual_d / 100, abs=max(0.01, 1.5 / period))   # one-sample resolution
+
+
+@needs_pwm
+def test_pwm_streaming_loopback(dev):
+    from la5016 import stream as lstream
+    dev.set_pwm(PWM - 1, True, 1_000, 50)
+    try:
+        st = dev.stream(CaptureConfig(samplerate=10_000_000, channel_mask=0xF, threshold=THRESHOLD))
+        sink = Collect()
+        try:
+            lstream.expand(st, sink, st.channels, limit_samples=10_000_000)
+        finally:
+            st.stop()
+    finally:
+        dev.set_pwm(PWM - 1, False)
+    ch0 = (np.concatenate(sink.parts) & 1).astype(np.int8)
+    periods = np.diff(np.flatnonzero(np.diff(ch0) == 1))
+    assert len(periods) >= 998 and set(periods.tolist()) == {10_000}   # no lost or repeated data

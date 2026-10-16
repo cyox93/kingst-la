@@ -171,3 +171,42 @@ def test_stream_rejects_trigger_and_fast_rates():
         d.Device(FakeTransport()).stream(d.CaptureConfig(samplerate=200_000_000, channel_mask=1))
     with pytest.raises(d.DeviceError):
         d.Device(FakeTransport()).stream(d.CaptureConfig(samplerate=1_000_000, triggers={0: "r"}))
+
+
+def test_pwm_registers_follow_sigrok_rounding():
+    assert d.pwm_registers(1000, 50) == (200_000, 100_000)
+    assert d.pwm_registers(3_000_000, 33.3) == (66, 22)        # int(66.67), round(21.98)
+    assert d.pwm_actual(66, 22) == pytest.approx((3_030_303.03, 33.333), rel=1e-4)
+    for bad in ((0, 50), (20_000_001, 50), (1000, 0), (1000, 100.1)):
+        with pytest.raises(d.DeviceError):
+            d.pwm_registers(*bad)
+
+
+def test_set_pwm_sequence_and_state_keeps_other_output():
+    t = FakeTransport()
+    dev = d.Device(t)
+    assert dev.set_pwm(1, True, 100_000, 50) == (100_000, 50)
+    t.log.clear()
+    assert dev.set_pwm(0, True, 1000, 25) == (1000, 25)
+    en = t.writes(d.REG_PWM_EN)
+    assert en == [b"\x02", b"\x03"]                     # PWM1 off (PWM2 stays on), then both on
+    assert t.writes(d.REG_PWM1) == [struct.pack("<II", 200_000, 50_000)]
+    t.log.clear()
+    assert dev.set_pwm(1, False) is None
+    assert t.writes(d.REG_PWM_EN) == [b"\x01"] and not t.writes(d.REG_PWM2)
+    assert dev.pwm_state() == [(True, 1000, 25), (False, 100_000, 50)]
+
+
+def test_set_pwm_reuses_last_frequency():
+    t = FakeTransport()
+    dev = d.Device(t)
+    dev.set_pwm(0, True, 2000, 50)
+    assert dev.set_pwm(0, True, duty=10) == (2000, 10)
+
+
+def test_bitstream_upload_resets_pwm_state():
+    t = FakeTransport(fpga_loaded=False)
+    dev = d.Device(t)
+    dev.set_pwm(0, True, 5000, 50)
+    dev.init_hardware(load_bitstream=lambda name: b"\x00" * 10)
+    assert dev.pwm_state()[0][0] is False

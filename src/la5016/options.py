@@ -40,6 +40,8 @@ SAMPLERATE_LIST = tuple(int(r) for r in (
 STREAM_MAX_SAMPLERATE = 100_000_000
 
 CONFIG_KEYS = {"samplerate", "captureratio", "voltage_threshold", "continuous"}
+PWM_GROUPS = ("PWM1", "PWM2")
+PWM_KEYS = {"enabled", "output_frequency", "duty_cycle"}
 
 TRIGGER_CONDITIONS = ("0", "1", "r", "f")
 
@@ -303,4 +305,41 @@ def parse_config(text_list: List[str]) -> dict:
         else:
             raise UsageError(
                 f"unknown config key '{key}': expected one of {', '.join(sorted(CONFIG_KEYS))}")
+    return out
+
+
+def parse_si_float(text: str) -> float:
+    """Like parse_si() but allows fractions: "0.5", "1.5k", "2.5 MHz"."""
+    m = _SI_RE.fullmatch(text.strip())
+    if not m:
+        raise UsageError(f"invalid number '{text}'")
+    return float(m.group(1)) * _SI_MULT[m.group(2)]
+
+
+def parse_channel_group(text: str) -> int:
+    """-g value -> PWM index (0 for PWM1, 1 for PWM2)."""
+    if text not in PWM_GROUPS:
+        raise UsageError(f"unknown channel group '{text}': expected {' or '.join(PWM_GROUPS)}")
+    return PWM_GROUPS.index(text)
+
+
+def parse_pwm_config(text_list: List[str]) -> dict:
+    """-c options for a PWM group: enabled (bool), output_frequency (Hz), duty_cycle (%)."""
+    raw: Dict[str, str] = {}
+    for text in text_list:
+        if not text.strip():
+            raise UsageError("empty -c option")
+        raw.update(parse_kv(text))
+    out: dict = {}
+    for key, value in raw.items():
+        if key == "enabled":
+            out[key] = parse_bool(value, key)
+        elif key == "output_frequency":
+            out[key] = parse_si_float(value)
+        elif key == "duty_cycle":
+            v = value.strip()
+            out[key] = parse_si_float(v[:-1] if v.endswith("%") else v)
+        else:
+            raise UsageError(
+                f"unknown PWM config key '{key}': expected one of {', '.join(sorted(PWM_KEYS))}")
     return out

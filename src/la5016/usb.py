@@ -266,7 +266,22 @@ class BulkReader:
                     self._error = "stream overrun: processing fell behind the device"
                     break
         finally:
-            self._q.put(None)  # wake the consumer; may block briefly when full
+            self._finish()
+
+    def _finish(self) -> None:
+        """Queue the end marker without blocking, even when nobody consumes any more."""
+        while True:
+            try:
+                self._q.put_nowait(None)
+                return
+            except queue.Full:
+                if not self._stop.is_set():
+                    time.sleep(0.01)   # consumer still draining
+                    continue
+                try:
+                    self._q.get_nowait()
+                except queue.Empty:
+                    pass
 
     def __iter__(self) -> Iterator[bytes]:
         while True:
@@ -280,5 +295,7 @@ class BulkReader:
     def stop(self) -> None:
         self._stop.set()
 
-    def join(self, timeout: float = 5.0) -> None:
+    def join(self, timeout: float = 5.0) -> bool:
+        """Wait for the pending read to finish; True when the thread has ended."""
         self._thread.join(timeout)
+        return not self._thread.is_alive()

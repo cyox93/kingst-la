@@ -63,6 +63,19 @@ The decoders are libsigrokdecode's own Python files, run unmodified by a pure Py
 replaced by decoder output, as in sigrok-cli. `--protocol-decoder-samplenum` prefixes each
 annotation with its sample range; `-l 3`/`-l 4` add quotes, class ids and short texts.
 
+### PWM outputs
+
+```sh
+la5016 -g PWM1 -c enabled=on:output_frequency=1k:duty_cycle=25 --set   # prints the actual frequency/duty
+la5016 -g PWM2 -c output_frequency=123.4k --set                       # giving a value turns it on
+la5016 -g PWM1 -c enabled=off --set
+la5016 --show                                                         # includes the last PWM settings
+```
+
+The two generators run at 200 MHz / N (up to 20 MHz) and keep running after the command exits,
+so a later command can capture them, e.g. wire PWM2 to CH0 as a known test signal. The PWM
+registers cannot be read back; la5016 remembers what it last set in its data directory.
+
 ### Streaming
 
 ```sh
@@ -92,6 +105,7 @@ Differences from sigrok-cli are listed in [docs/design.md](docs/design.md) §5.4
 pytest                                                    # no hardware
 LA5016_TEST_FREQ=1000 LA5016_TEST_THRESHOLD=0.6 pytest -m hw  # LA5016 with a 1 kHz signal on CH0
 pytest -m decoders                                        # needs --install-decoders
+LA5016_TEST_PWM=2 pytest -m hw                            # PWM2 wired to CH0: loopback tests
 ```
 
 ## License
