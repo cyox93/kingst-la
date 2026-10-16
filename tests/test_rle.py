@@ -6,7 +6,7 @@ import time
 import numpy as np
 import pytest
 
-from la5016.rle import ExpandStats, expand
+from kingst_la.rle import ExpandStats, expand
 
 
 class RecSink:

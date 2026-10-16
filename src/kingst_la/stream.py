@@ -13,7 +13,7 @@ from typing import Iterable, List, Optional, Sequence
 
 import numpy as np
 
-from la5016.pipeline import Sink
+from kingst_la.pipeline import Sink
 
 
 class Deinterleaver:

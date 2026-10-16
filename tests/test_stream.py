@@ -4,7 +4,7 @@ import struct
 import numpy as np
 import pytest
 
-from la5016 import stream
+from kingst_la import stream
 
 
 def interleave(samples, channels):

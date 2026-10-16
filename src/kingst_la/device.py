@@ -14,9 +14,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterator, Optional
 
-from la5016 import firmware
-from la5016.options import effective_samplerate, hardware_divider
-from la5016.usb import EP_BITSTREAM, EP_CAPTURE, Transport
+from kingst_la import firmware
+from kingst_la.options import effective_samplerate, hardware_divider
+from kingst_la.usb import EP_BITSTREAM, EP_CAPTURE, Transport
 
 log = logging.getLogger(__name__)
 
@@ -307,7 +307,7 @@ class Device:
     # bitstream load stops both outputs and clears it.
 
     def pwm_state(self) -> list:
-        """[(enabled, freq, duty), (…)] for PWM1 and PWM2 as last set by la5016."""
+        """[(enabled, freq, duty), (…)] for PWM1 and PWM2 as last set by kingst-la."""
         try:
             data = json.loads(pwm_state_file().read_text())
             return [tuple(x) for x in data["pwm"]][:2]
@@ -481,7 +481,7 @@ class Stream:
 
 def open_device(conn=None, load_firmware: Callable[[str], bytes] = firmware.load) -> Device:
     """Find the LA5016, load FX2 firmware if needed, identify it and set up the FPGA."""
-    from la5016 import usb as lusb
+    from kingst_la import usb as lusb
 
     cand = lusb.select(conn)
     if not cand.has_firmware:

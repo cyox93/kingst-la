@@ -11,12 +11,12 @@ from typing import BinaryIO, List, Optional
 
 import numpy as np
 
-from la5016 import __version__, firmware, options, output, rle, stream
-from la5016 import input as inputs
-from la5016.options import UsageError
-from la5016.pipeline import Channel, Meta, Sink
+from kingst_la import __version__, firmware, options, output, rle, stream
+from kingst_la import input as inputs
+from kingst_la.options import UsageError
+from kingst_la.pipeline import Channel, Meta, Sink
 
-log = logging.getLogger("la5016")
+log = logging.getLogger("kla")
 
 MODEL = "Kingst LA5016"
 CHANNELS = 16
@@ -27,9 +27,9 @@ _LOGLEVELS = {0: logging.CRITICAL + 10, 1: logging.ERROR, 2: logging.WARNING,
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="la5016",
+        prog="kla",
         description="Kingst LA5016 logic analyzer capture, sigrok-cli compatible.",
-        epilog="Example: la5016 -c samplerate=1m --samples 1m -C CH0 -O vcd -o cap.vcd",
+        epilog="Example: kla -c samplerate=1m --samples 1m -C CH0 -O vcd -o cap.vcd",
     )
     p.add_argument("-V", "--version", action="store_true", help="show version")
     p.add_argument("-l", "--loglevel", type=int, default=2, metavar="LEVEL", help="0-5 (default 2)")
@@ -60,13 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--protocol-decoder-samplenum", action="store_true", help="show sample numbers")
     p.add_argument("-L", "--list-supported", action="store_true", help="list formats and decoders")
     p.add_argument("--install-decoders", nargs="?", const="all", metavar="all|PD[,PD...]",
-                   help="download sigrok protocol decoders, all or the named ones (la5016 extension)")
+                   help="download sigrok protocol decoders, all or the named ones (kingst-la extension)")
     p.add_argument("--decoders-commit", metavar="COMMIT",
                    help="libsigrokdecode commit for --install-decoders/--list-decoders")
     p.add_argument("--list-decoders", nargs="?", const="available", choices=("available", "installed"),
-                   help="decoders that can be installed (default, needs network) or are installed (la5016 extension)")
+                   help="decoders that can be installed (default, needs network) or are installed (kingst-la extension)")
     p.add_argument("--extract-firmware", nargs="?", const=firmware.DEFAULT_KINGSTVIS, metavar="KINGSTVIS",
-                   help="extract FX2 firmware and FPGA bitstreams from KingstVIS (la5016 extension)")
+                   help="extract FX2 firmware and FPGA bitstreams from KingstVIS (kingst-la extension)")
     return p
 
 
@@ -74,7 +74,7 @@ def _setup_logging(level: int) -> None:
     logging.basicConfig(level=_LOGLEVELS.get(max(0, min(5, level))), stream=sys.stderr,
                         format="%(name)s: %(message)s")
     if level < 5:
-        logging.getLogger("la5016.usb").setLevel(max(logging.INFO, _LOGLEVELS[min(level, 5)]))
+        logging.getLogger("kingst_la.usb").setLevel(max(logging.INFO, _LOGLEVELS[min(level, 5)]))
 
 
 def _conn(args) -> Optional[tuple]:
@@ -102,7 +102,7 @@ def cmd_extract(app: str, out) -> int:
 
 
 def cmd_list_decoders(which: str, commit: Optional[str], loglevel: int, out) -> int:
-    from la5016.srd import install
+    from kingst_la.srd import install
     inst = install.installed_entries()
     ver = install.installed_version()
     where = install.decoders_dir()
@@ -120,7 +120,7 @@ def cmd_list_decoders(which: str, commit: Optional[str], loglevel: int, out) -> 
 
 
 def cmd_install_decoders(which: str, commit: Optional[str], out) -> int:
-    from la5016.srd import install
+    from kingst_la.srd import install
     names = None if which == "all" else [n.strip() for n in which.split(",") if n.strip()]
     if names is not None and not names:
         raise UsageError("no decoder names given to --install-decoders")
@@ -148,7 +148,7 @@ _INPUT_DESCRIPTIONS = (
 
 
 def cmd_list(args, out) -> int:
-    from la5016.srd import annotate, loader
+    from kingst_la.srd import annotate, loader
     out.write("Supported hardware drivers:\n  %-20s %s\n\n" % (options.DRIVER, "Kingst LA2016"))
     out.write("Supported output formats:\n")
     for name, desc in _FORMAT_DESCRIPTIONS:
@@ -168,7 +168,7 @@ def cmd_list(args, out) -> int:
 
 
 def cmd_show_decoders(args, out) -> int:
-    from la5016.srd import annotate, loader
+    from kingst_la.srd import annotate, loader
     for text in args.protocol_decoders:
         for spec in loader.parse_pd(text):
             out.write(annotate.show_text(loader.load(spec.name)))
@@ -183,8 +183,8 @@ def cmd_set_pwm(args, out, open_device=None) -> int:
     # Giving a frequency or duty implies "on"; the generator keeps running after exit.
     enabled = cfg.get("enabled", True)
     if open_device is None:
-        from la5016.device import open_device
-    from la5016.device import DeviceError
+        from kingst_la.device import open_device
+    from kingst_la.device import DeviceError
     dev = open_device(_conn(args))
     try:
         try:
@@ -209,7 +209,7 @@ def _freq_str(f: float) -> str:
 
 
 def cmd_scan(args, out) -> int:
-    from la5016.device import open_device
+    from kingst_la.device import open_device
     dev = open_device(_conn(args))
     try:
         out.write("The following devices were found:\n")
@@ -220,7 +220,7 @@ def cmd_scan(args, out) -> int:
 
 
 def cmd_show(args, out) -> int:
-    from la5016.device import open_device
+    from kingst_la.device import open_device
     dev = open_device(_conn(args))
     try:
         ident = dev.identity
@@ -242,7 +242,7 @@ def cmd_show(args, out) -> int:
         out.write("    voltage_threshold: %s\n" % ", ".join(
             "%.1f-%.1f%s" % (v, v, " (current)" if v == options.DEFAULT_THRESHOLD else "")
             for v in options.THRESHOLDS))
-        out.write("Channel groups (PWM state as last set by la5016):\n")
+        out.write("Channel groups (PWM state as last set by kingst-la):\n")
         for name, (on, freq, duty) in zip(options.PWM_GROUPS, dev.pwm_state()):
             out.write("    %s: %s, output_frequency %s, duty_cycle %.4g %%\n"
                       % (name, "on" if on else "off", _freq_str(freq), duty))
@@ -273,7 +273,7 @@ def _stream(dev, cfg, channels: List[Channel], sink, limit: Optional[int], intr:
                 if intr.stop:
                     st.stop()   # first Ctrl-C: halt, then drain what is in flight
 
-        from la5016.usb import StreamError
+        from kingst_la.usb import StreamError
         broken = None
         try:
             stats = stream.expand(chunks(), sink, st.channels, limit_samples=limit)
@@ -297,7 +297,7 @@ class _Incomplete(Exception):
 def _decoder_sink(args, channels: List[Channel], out: BinaryIO):
     """-P: decoder stacks replace the logic output, as in sigrok-cli."""
     import io
-    from la5016.srd import annotate, loader, session
+    from kingst_la.srd import annotate, loader, session
     try:
         # Only one output type is shown: -B, else -M, else annotations (sigrok-cli main.c).
         if args.protocol_decoder_binary:
@@ -455,9 +455,9 @@ def cmd_input(args) -> int:
 
 
 def cmd_capture(args, open_device=None) -> int:
-    from la5016.device import CaptureConfig
+    from kingst_la.device import CaptureConfig
     if open_device is None:
-        from la5016.device import open_device
+        from kingst_la.device import open_device
 
     cfg_in = options.parse_config(args.config)
     channels = options.parse_channels(args.channels, CHANNELS)
@@ -530,7 +530,7 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
     _setup_logging(args.loglevel)
     try:
         if args.version:
-            print("la5016 %s" % __version__)
+            print("kingst-la %s" % __version__)
             return 0
         if args.extract_firmware:
             return cmd_extract(args.extract_firmware, sys.stdout)
@@ -585,7 +585,7 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
     except Exception as e:  # device, USB, firmware and decoder errors
         if args.loglevel >= 4:
             raise
-        from la5016.srd.session import DecoderError
+        from kingst_la.srd.session import DecoderError
         if isinstance(e, DecoderError):
             logging.getLogger("srd").error("%s", e)
         else:

@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from la5016 import device as d
+from kingst_la import device as d
 
 from fake import FakeTransport, transfers
 

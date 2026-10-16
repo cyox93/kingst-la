@@ -48,17 +48,17 @@ class FirmwareError(Exception):
 
 def firmware_dir() -> Path:
     """Per-user directory that holds the extracted files."""
-    env = os.environ.get("LA5016_FIRMWARE_DIR")
+    env = os.environ.get("KINGST_LA_FIRMWARE_DIR")
     if env:
         return Path(env)
     home = Path.home()
     if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "la5016" / "firmware"
+        return home / "Library" / "Application Support" / "kingst-la" / "firmware"
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA") or str(home / "AppData" / "Local")
-        return Path(base) / "la5016" / "firmware"
+        return Path(base) / "kingst-la" / "firmware"
     base = os.environ.get("XDG_DATA_HOME") or str(home / ".local" / "share")
-    return Path(base) / "la5016" / "firmware"
+    return Path(base) / "kingst-la" / "firmware"
 
 
 def mcu_firmware_name(pid: int) -> str:
@@ -75,7 +75,7 @@ def load(name: str) -> bytes:
         return path.read_bytes()
     except FileNotFoundError:
         raise FirmwareError(
-            "missing firmware file %s; run 'la5016 --extract-firmware' first" % path
+            "missing firmware file %s; run 'kla --extract-firmware' first" % path
         ) from None
 
 

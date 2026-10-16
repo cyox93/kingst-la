@@ -6,11 +6,11 @@ import zipfile
 import numpy as np
 import pytest
 
-from la5016 import cli, input as inputs, options
-from la5016.input.srzip import parse_keyfile, parse_size
-from la5016.options import UsageError
-from la5016.output import create, srzip
-from la5016.pipeline import Channel, Meta
+from kingst_la import cli, input as inputs, options
+from kingst_la.input.srzip import parse_keyfile, parse_size
+from kingst_la.options import UsageError
+from kingst_la.output import create, srzip
+from kingst_la.pipeline import Channel, Meta
 
 from test_cli import SQUARE, _capture, _opener, toggles  # noqa: F401  (fixture)
 
@@ -69,7 +69,7 @@ def test_metadata_matches_libsigrok(tmp_path):
         data = np.frombuffer(zf.read("logic-1-1"), "<u2")
     assert meta == (
         "[global]\n"
-        "sigrok version=la5016 %s\n"
+        "sigrok version=kingst-la %s\n"
         "\n"
         "[device 1]\n"
         "capturefile=logic-1\n"
@@ -78,7 +78,7 @@ def test_metadata_matches_libsigrok(tmp_path):
         "total analog=0\n"
         "probe1=CH0\n"
         "probe4=SDA\n"
-        "unitsize=2\n" % __import__("la5016").__version__)
+        "unitsize=2\n" % __import__("kingst_la").__version__)
     # Bits of disabled channels are cleared.
     assert data.tolist() == (np.arange(40) & 0b1001).tolist()
 

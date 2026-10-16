@@ -1,7 +1,7 @@
 """Hardware tests: need a connected LA5016 and extracted firmware.
 
 Run with `pytest -m hw`. Feed a known periodic signal into CH0 and set
-LA5016_TEST_FREQ (Hz) and, if its amplitude is small, LA5016_TEST_THRESHOLD (V).
+KINGST_LA_TEST_FREQ (Hz) and, if its amplitude is small, KINGST_LA_TEST_THRESHOLD (V).
 """
 
 import os
@@ -9,13 +9,13 @@ import os
 import numpy as np
 import pytest
 
-from la5016 import rle
-from la5016.device import CaptureConfig, open_device
+from kingst_la import rle
+from kingst_la.device import CaptureConfig, open_device
 
 pytestmark = pytest.mark.hw
 
-FREQ = float(os.environ.get("LA5016_TEST_FREQ", "0"))
-THRESHOLD = float(os.environ.get("LA5016_TEST_THRESHOLD", "1.4"))
+FREQ = float(os.environ.get("KINGST_LA_TEST_FREQ", "0"))
+THRESHOLD = float(os.environ.get("KINGST_LA_TEST_THRESHOLD", "1.4"))
 
 
 class Collect:
@@ -56,7 +56,7 @@ def test_capture_is_consistent(dev, rate):
     assert stats.seq_breaks == 0 and stats.leftover_bytes == 0
 
 
-@pytest.mark.skipif(not FREQ, reason="set LA5016_TEST_FREQ to the CH0 signal frequency")
+@pytest.mark.skipif(not FREQ, reason="set KINGST_LA_TEST_FREQ to the CH0 signal frequency")
 def test_ch0_frequency(dev):
     rate = 1_000_000
     n = int(max(20, 50 * rate / FREQ)) if FREQ < rate / 20 else 1_000_000
@@ -80,7 +80,7 @@ def test_edge_trigger(dev, cond, before, after):
 @pytest.mark.parametrize("rate, mask", [(10_000_000, 0xF), (100_000_000, 0x1)])  # 40 and 100 Mbps; 200 Mbps breaks off now and then
 def test_stream_runs_in_real_time(dev, rate, mask):
     import time
-    from la5016 import stream as lstream
+    from kingst_la import stream as lstream
     st = dev.stream(CaptureConfig(samplerate=rate, channel_mask=mask, threshold=THRESHOLD))
     sink = Collect()
     t = time.time()
@@ -106,9 +106,9 @@ def test_divider_rounding_matches_hardware(dev, requested, actual):
     assert dt == pytest.approx(0.5, rel=0.25)
 
 
-# PWM loopback: wire a PWM output to CH0 and set LA5016_TEST_PWM to 1 or 2.
-PWM = int(os.environ.get("LA5016_TEST_PWM", "0"))
-needs_pwm = pytest.mark.skipif(PWM not in (1, 2), reason="wire PWM1 or PWM2 to CH0, set LA5016_TEST_PWM")
+# PWM loopback: wire a PWM output to CH0 and set KINGST_LA_TEST_PWM to 1 or 2.
+PWM = int(os.environ.get("KINGST_LA_TEST_PWM", "0"))
+needs_pwm = pytest.mark.skipif(PWM not in (1, 2), reason="wire PWM1 or PWM2 to CH0, set KINGST_LA_TEST_PWM")
 
 
 @needs_pwm
@@ -130,7 +130,7 @@ def test_pwm_loopback(dev, freq, duty, rate):
 
 @needs_pwm
 def test_pwm_streaming_loopback(dev):
-    from la5016 import stream as lstream
+    from kingst_la import stream as lstream
     dev.set_pwm(PWM - 1, True, 1_000, 50)
     try:
         st = dev.stream(CaptureConfig(samplerate=10_000_000, channel_mask=0xF, threshold=THRESHOLD))
@@ -150,7 +150,7 @@ def test_pwm_streaming_loopback(dev):
 @pytest.mark.parametrize("rate", [10_000_000, 100_000_000])
 def test_pwm_one_channel_stream_starts_in_phase(dev, rate):
     # A one-channel stream may begin with two words from before a time gap; they must be dropped.
-    from la5016 import stream as lstream
+    from kingst_la import stream as lstream
     dev.set_pwm(PWM - 1, True, rate // 10, 30)
     try:
         for _ in range(10):

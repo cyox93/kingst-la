@@ -1,34 +1,37 @@
-# la5016
+# kingst-la
 
-Kingst LA5016 logic analyzer capture for macOS (and, untested, Linux/Windows),
-in Python over libusb. Options and output formats follow
+Capture for Kingst LA series logic analyzers on macOS (and, untested, Linux/Windows),
+in Python over libusb. The command is `kla`. Only the LA5016 is supported so far; the
+code is laid out so other models of the family can be added. Options and output formats follow
 [sigrok-cli](https://sigrok.org/wiki/Sigrok-cli); the USB protocol is ported from
 libsigrok's `kingst-la2016` driver. Neither sigrok nor KingstVIS is needed at run time.
+
+This is an unofficial project, not affiliated with or endorsed by Kingst or sigrok.
 
 ## Install
 
 ```sh
 brew install libusb
 pip install -e '.[dev]'
-la5016 --extract-firmware          # once; reads /Applications/KingstVIS.app
+kla --extract-firmware          # once; reads /Applications/KingstVIS.app
 ```
 
 The FX2 firmware and FPGA bitstreams belong to Kingst and are not part of this
 repository. `--extract-firmware` copies them out of your own KingstVIS into
-`~/Library/Application Support/la5016/firmware/` (Linux: `~/.local/share/la5016/firmware/`,
-Windows: `%LOCALAPPDATA%\la5016\firmware\`; override with `LA5016_FIRMWARE_DIR`).
+`~/Library/Application Support/kingst-la/firmware/` (Linux: `~/.local/share/kingst-la/firmware/`,
+Windows: `%LOCALAPPDATA%\kingst-la\firmware\`; override with `KINGST_LA_FIRMWARE_DIR`).
 Do not commit or redistribute them.
 
 ## Use
 
 ```sh
-la5016 --scan
-la5016 --show
-la5016 -c samplerate=1m --samples 100k -C CH0,CH1=SDA -O vcd -o cap.vcd
-la5016 -c samplerate=100m:captureratio=20 -t CH0=r --time 10ms -O csv
-la5016 -c voltage_threshold=0.6-0.6 --samples 1m -C CH0 -O bits
-la5016 -c samplerate=500m -o cap.vcd     # no limit: stops when memory is full or on Ctrl-C
-la5016 -c samplerate=10m --samples 10m -o cap.sr   # sigrok session file, opens in PulseView
+kla --scan
+kla --show
+kla -c samplerate=1m --samples 100k -C CH0,CH1=SDA -O vcd -o cap.vcd
+kla -c samplerate=100m:captureratio=20 -t CH0=r --time 10ms -O csv
+kla -c voltage_threshold=0.6-0.6 --samples 1m -C CH0 -O bits
+kla -c samplerate=500m -o cap.vcd     # no limit: stops when memory is full or on Ctrl-C
+kla -c samplerate=10m --samples 10m -o cap.sr   # sigrok session file, opens in PulseView
 ```
 
 | Option | |
@@ -49,16 +52,16 @@ la5016 -c samplerate=10m --samples 10m -o cap.sr   # sigrok session file, opens 
 ### Protocol decoders
 
 ```sh
-la5016 --list-decoders                         # what can be installed (needs network), marks installed ones
-la5016 --install-decoders                       # all of them; fetches sigrok's decoders (GPL) at a pinned commit
-la5016 --install-decoders uart,i2c              # or just some (common/ always comes along)
-la5016 --list-decoders installed               # offline: what is installed, and from which commit
-la5016 -L                                       # formats and decoders
-la5016 --show -P uart                           # channels, options, annotation classes
-la5016 -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -A uart=rx-data
-la5016 -c samplerate=4m --time 50ms -P i2c:scl=CH0:sda=CH1,eeprom24xx
-la5016 -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -B uart=rx -o rx.bin
-la5016 -c samplerate=4m --time 50ms -P i2c:scl=CH0:sda=CH1 -M i2c     # meta output: "i2c-1: Bitrate: <bit/s>"
+kla --list-decoders                         # what can be installed (needs network), marks installed ones
+kla --install-decoders                       # all of them; fetches sigrok's decoders (GPL) at a pinned commit
+kla --install-decoders uart,i2c              # or just some (common/ always comes along)
+kla --list-decoders installed               # offline: what is installed, and from which commit
+kla -L                                       # formats and decoders
+kla --show -P uart                           # channels, options, annotation classes
+kla -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -A uart=rx-data
+kla -c samplerate=4m --time 50ms -P i2c:scl=CH0:sda=CH1,eeprom24xx
+kla -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -B uart=rx -o rx.bin
+kla -c samplerate=4m --time 50ms -P i2c:scl=CH0:sda=CH1 -M i2c     # meta output: "i2c-1: Bitrate: <bit/s>"
 ```
 
 The decoders are libsigrokdecode's own Python files, run unmodified by a pure Python
@@ -70,9 +73,9 @@ annotation with its sample range; `-l 3`/`-l 4` add quotes, class ids and short 
 ### Session files
 
 ```sh
-la5016 -i cap.sr -O vcd -o cap.vcd                     # convert
-la5016 -i cap.sr -P uart:rx=CH0:baudrate=115200        # decode again without the device
-la5016 -i pulseview.sr -C D0=CLK,D1 --samples 100k -O csv
+kla -i cap.sr -O vcd -o cap.vcd                     # convert
+kla -i cap.sr -P uart:rx=CH0:baudrate=115200        # decode again without the device
+kla -i pulseview.sr -C D0=CLK,D1 --samples 100k -O csv
 ```
 
 `-o x.sr` writes sigrok's srzip format, the same files PulseView and libsigrok's `kingst-la2016`
@@ -83,21 +86,21 @@ take the first part. The trigger position is not stored in srzip.
 ### PWM outputs
 
 ```sh
-la5016 -g PWM1 -c enabled=on:output_frequency=1k:duty_cycle=25 --set   # prints the actual frequency/duty
-la5016 -g PWM2 -c output_frequency=123.4k --set                       # giving a value turns it on
-la5016 -g PWM1 -c enabled=off --set
-la5016 --show                                                         # includes the last PWM settings
+kla -g PWM1 -c enabled=on:output_frequency=1k:duty_cycle=25 --set   # prints the actual frequency/duty
+kla -g PWM2 -c output_frequency=123.4k --set                       # giving a value turns it on
+kla -g PWM1 -c enabled=off --set
+kla --show                                                         # includes the last PWM settings
 ```
 
 The two generators run at 200 MHz / N (up to 20 MHz) and keep running after the command exits,
 so a later command can capture them, e.g. wire PWM2 to CH0 as a known test signal. The PWM
-registers cannot be read back; la5016 remembers what it last set in its data directory.
+registers cannot be read back; kingst-la remembers what it last set in its data directory.
 
 ### Streaming
 
 ```sh
-la5016 -c continuous=on:samplerate=10m -C CH0-CH3 -o long.vcd        # until Ctrl-C
-la5016 -c continuous=on:samplerate=1m --time 60s -P uart:rx=CH0:baudrate=9600
+kla -c continuous=on:samplerate=10m -C CH0-CH3 -o long.vcd        # until Ctrl-C
+kla -c continuous=on:samplerate=1m --time 60s -P uart:rx=CH0:baudrate=9600
 ```
 
 Streaming sends samples while the device keeps sampling, so a capture can be longer than the
@@ -120,9 +123,9 @@ Differences from sigrok-cli are listed in [docs/design.md](docs/design.md) §5.4
 
 ```sh
 pytest                                                    # no hardware
-LA5016_TEST_FREQ=1000 LA5016_TEST_THRESHOLD=0.6 pytest -m hw  # LA5016 with a 1 kHz signal on CH0
+KINGST_LA_TEST_FREQ=1000 KINGST_LA_TEST_THRESHOLD=0.6 pytest -m hw  # LA5016 with a 1 kHz signal on CH0
 pytest -m decoders                                        # needs --install-decoders
-LA5016_TEST_PWM=2 pytest -m hw                            # PWM2 wired to CH0: loopback tests
+KINGST_LA_TEST_PWM=2 pytest -m hw                            # PWM2 wired to CH0: loopback tests
 ```
 
 ## License

@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from la5016 import firmware
-from la5016.pipeline import Channel
-from la5016.srd import api
-from la5016.srd.session import Callbacks, Instance
+from kingst_la import firmware
+from kingst_la.pipeline import Channel
+from kingst_la.srd import api
+from kingst_la.srd.session import Callbacks, Instance
 
 
 class LoadError(Exception):
@@ -25,7 +25,7 @@ class LoadError(Exception):
 
 
 def decoders_dir() -> Path:
-    env = os.environ.get("LA5016_DECODERS_DIR")
+    env = os.environ.get("KINGST_LA_DECODERS_DIR")
     return Path(env) if env else firmware.firmware_dir().parent / "decoders"
 
 
@@ -77,7 +77,7 @@ def load(name: str, path: Optional[Path] = None) -> DecoderInfo:
     path = path or decoders_dir()
     pkg = path / name
     if not re.fullmatch(r"[A-Za-z0-9_-]+", name) or not (pkg / "__init__.py").is_file():
-        hint = "" if path.is_dir() else "; run 'la5016 --install-decoders' first"
+        hint = "" if path.is_dir() else "; run 'kla --install-decoders' first"
         raise LoadError("protocol decoder '%s' not found in %s%s" % (name, path, hint))
     _prepare(path)
     spec = importlib.util.spec_from_file_location(name, pkg / "__init__.py", submodule_search_locations=[str(pkg)])

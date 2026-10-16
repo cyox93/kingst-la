@@ -21,8 +21,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
-from la5016.pipeline import Meta
-from la5016.srd import api, conditions
+from kingst_la.pipeline import Meta
+from kingst_la.srd import api, conditions
 
 log = logging.getLogger("srd")
 

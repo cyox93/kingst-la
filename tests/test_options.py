@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from la5016.options import (
+from kingst_la.options import (
     BASECLOCK,
     CONFIG_KEYS,
     MAX_SAMPLERATE,
@@ -26,7 +26,7 @@ from la5016.options import (
     parse_triggers,
     samplerate_divider,
 )
-from la5016.pipeline import Channel
+from kingst_la.pipeline import Channel
 
 
 def test_usage_error_is_value_error():

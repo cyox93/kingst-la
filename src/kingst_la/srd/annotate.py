@@ -9,8 +9,8 @@ from __future__ import annotations
 import re
 from typing import BinaryIO, Dict, List, Optional, Sequence, Set, TextIO
 
-from la5016.srd.loader import DecoderInfo, LoadError
-from la5016.srd.session import Callbacks, Instance
+from kingst_la.srd.loader import DecoderInfo, LoadError
+from kingst_la.srd.session import Callbacks, Instance
 
 ALL = -1
 

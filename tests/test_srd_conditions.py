@@ -4,7 +4,7 @@ import random
 import numpy as np
 import pytest
 
-from la5016.srd import conditions as c
+from kingst_la.srd import conditions as c
 
 
 def run(fn, conds, buf, start, cmap, old):

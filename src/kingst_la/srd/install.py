@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import List, NamedTuple, Optional
 
-from la5016.srd.loader import decoders_dir
+from kingst_la.srd.loader import decoders_dir
 
 DEFAULT_COMMIT = "71f451443029322d57376214c330b518efd84f88"
 URL = "https://codeload.github.com/sigrokproject/libsigrokdecode/tar.gz/%s"

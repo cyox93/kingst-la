@@ -1,4 +1,4 @@
-"""Real sigrok decoders on synthetic signals. Needs `la5016 --install-decoders`.
+"""Real sigrok decoders on synthetic signals. Needs `kla --install-decoders`.
 
 Run with `pytest -m decoders`.
 """
@@ -8,12 +8,12 @@ import io
 import numpy as np
 import pytest
 
-from la5016.pipeline import Channel, Meta
-from la5016.srd import annotate, loader, session
+from kingst_la.pipeline import Channel, Meta
+from kingst_la.srd import annotate, loader, session
 
 pytestmark = [
     pytest.mark.decoders,
-    pytest.mark.skipif(not loader.available(), reason="run 'la5016 --install-decoders' first"),
+    pytest.mark.skipif(not loader.available(), reason="run 'kla --install-decoders' first"),
 ]
 
 CHANNELS = [Channel(i, "CH%d" % i) for i in range(16)]

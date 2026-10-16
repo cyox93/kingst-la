@@ -3,7 +3,7 @@ import tarfile
 
 import pytest
 
-from la5016.srd import install
+from kingst_la.srd import install
 
 PD = '''
 import sigrokdecode as srd

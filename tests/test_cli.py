@@ -1,7 +1,7 @@
 import pytest
 
-from la5016 import cli
-from la5016 import device as d
+from kingst_la import cli
+from kingst_la import device as d
 
 from fake import FakeTransport, transfers
 
@@ -82,7 +82,7 @@ def test_device_error_removes_output_file(tmp_path):
 
 def test_version(capsys):
     assert cli.main(["-V"]) == 0
-    assert capsys.readouterr().out.startswith("la5016 ")
+    assert capsys.readouterr().out.startswith("kingst-la ")
 
 
 # --- protocol decoders (-P), with a tiny decoder written here ---------------
@@ -129,12 +129,12 @@ class Decoder(srd.Decoder):
 
 @pytest.fixture
 def toggles(tmp_path, monkeypatch):
-    from la5016.srd import loader
+    from kingst_la.srd import loader
     d = tmp_path / "decoders" / "toggles"
     d.mkdir(parents=True)
     (d / "__init__.py").write_text("from .pd import Decoder\n")
     (d / "pd.py").write_text(TOGGLES)
-    monkeypatch.setenv("LA5016_DECODERS_DIR", str(tmp_path / "decoders"))
+    monkeypatch.setenv("KINGST_LA_DECODERS_DIR", str(tmp_path / "decoders"))
     loader._loaded.clear()
     yield
     loader._loaded.clear()

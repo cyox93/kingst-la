@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import struct
 
-from la5016 import device as d
+from kingst_la import device as d
 
 
 def transfers(packets, seq0=0):
@@ -103,7 +103,7 @@ class FakeReader:
         return self
 
     def __iter__(self):
-        from la5016.usb import StreamError
+        from kingst_la.usb import StreamError
         for c in self.chunks:
             if self.stopped:
                 return

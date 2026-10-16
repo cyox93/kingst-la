@@ -5,8 +5,8 @@ import textwrap
 import numpy as np
 import pytest
 
-from la5016.pipeline import Channel, Meta
-from la5016.srd import annotate, loader, session
+from kingst_la.pipeline import Channel, Meta
+from kingst_la.srd import annotate, loader, session
 
 CHANNELS = [Channel(i, "CH%d" % i) for i in range(16)]
 

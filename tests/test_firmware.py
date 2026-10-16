@@ -5,7 +5,7 @@ import zlib
 
 import pytest
 
-from la5016 import firmware as fw
+from kingst_la import firmware as fw
 
 
 def _name(name):
@@ -116,7 +116,7 @@ def test_install_writes_files(tmp_path):
 
 
 def test_load_missing(tmp_path, monkeypatch):
-    monkeypatch.setenv("LA5016_FIRMWARE_DIR", str(tmp_path))
+    monkeypatch.setenv("KINGST_LA_FIRMWARE_DIR", str(tmp_path))
     with pytest.raises(fw.FirmwareError, match="--extract-firmware"):
         fw.load("kingst-la-01a2.fw")
 

@@ -1,7 +1,7 @@
 [project]
-name = "la5016"
+name = "kingst-la"
 version = "0.1.0"
-description = "Kingst LA5016 logic analyzer capture over libusb, sigrok-cli compatible, for macOS"
+description = "sigrok-cli compatible capture for Kingst LA logic analyzers (LA5016) over libusb"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
@@ -20,7 +20,7 @@ dependencies = ["pyusb>=1.2", "numpy>=1.22"]
 dev = ["pytest>=7"]
 
 [project.scripts]
-la5016 = "la5016.cli:main"
+kla = "kingst_la.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

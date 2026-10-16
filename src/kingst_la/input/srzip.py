@@ -157,7 +157,7 @@ def open_srzip(path: str) -> SrzipFile:
             if not 1 <= num <= total:
                 raise InputError("metadata names %s but the file has %d channels" % (key, total))
             if num > MAX_CHANNELS:
-                raise InputError("channel %s (probe %d) is beyond the %d channels la5016 handles"
+                raise InputError("channel %s (probe %d) is beyond the %d channels kingst-la handles"
                                  % (value, num, MAX_CHANNELS))
             channels.append(Channel(num - 1, value))
         channels.sort(key=lambda c: c.index)

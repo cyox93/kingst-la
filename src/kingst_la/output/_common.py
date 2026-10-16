@@ -17,7 +17,7 @@ from .. import __version__
 # Driver longname of libsigrok's kingst-la2016 driver (CSV header).
 DRIVER_LONGNAME = "Kingst LA2016"
 # Replaces "libsigrok <version>" wherever libsigrok prints its version.
-PACKAGE_VERSION = f"la5016 {__version__}"
+PACKAGE_VERSION = f"kingst-la {__version__}"
 
 FLT_MIN = 1.17549435082228750797e-38
 

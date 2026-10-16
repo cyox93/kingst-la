@@ -1,4 +1,4 @@
-# la5016 설계 — sigrok-cli 호환 로직 분석기 CLI
+# kingst-la 설계 — sigrok-cli 호환 로직 분석기 CLI
 
 - 작성: 2026-10-15
 - 범위: 1차 (캡처). 2차 이후 항목은 1절 "1차에서 제외" 참고
@@ -6,7 +6,7 @@
 
 ## 1. 목표와 범위
 
-Kingst LA5016 로직 분석기를 macOS에서 **pyusb + numpy만으로** 제어하는 Python CLI `la5016`을 만든다.
+Kingst LA5016 로직 분석기를 macOS에서 **pyusb + numpy만으로** 제어하는 Python CLI `kla`(프로젝트·패키지 `kingst-la`, import 이름 `kingst_la`)를 만든다. 처음 이름은 `la5016`이었고, 다른 Kingst LA 모델도 추가할 수 있는 구조라 2026-10-17에 바꿨다.
 옵션 체계와 출력 형식은 **sigrok-cli와 호환**한다. libsigrok·sigrok-cli·KingstVIS는 실행 시 필요 없다
 (KingstVIS.app은 펌웨어 추출에만 1회 쓴다).
 
@@ -33,11 +33,11 @@ Kingst LA5016 로직 분석기를 macOS에서 **pyusb + numpy만으로** 제어�
 | 항목 | 결정 | 근거 |
 |---|---|---|
 | 라이선스 | **GPL-3.0-or-later** | GPL-3 sigrok 드라이버를 옮긴다 |
-| 패키지·명령 이름 | `la5016` | |
+| 패키지·명령 이름 | `kingst-la` (`kingst_la`), 명령 `kla` | 모델에 묶이지 않는 이름. Kingst와 무관한 비공식 도구임을 README에 밝힌다 |
 | USB 접근 | **pyusb 동기 I/O** | SDRAM 모드는 캡처 종료 후 다운로드이므로 실시간성이 불필요 |
 | 내부 데이터 | numpy `uint16` 샘플 청크의 iterator | 수백 MB 캡처도 메모리에 전부 올리지 않는다. 출력과 디코더가 같은 인터페이스를 쓴다 |
 | 펌웨어 배포 | **저장소에 넣지 않는다** (public/private 모두) | Kingst 저작물. 사용자가 자기 KingstVIS.app에서 추출 |
-| 펌웨어 위치 | macOS `~/Library/Application Support/la5016/firmware/`, Linux `$XDG_DATA_HOME`(기본 `~/.local/share`)`/la5016/firmware/`, Windows `%LOCALAPPDATA%\la5016\firmware\` | 저장소 밖 |
+| 펌웨어 위치 | macOS `~/Library/Application Support/kingst-la/firmware/`, Linux `$XDG_DATA_HOME`(기본 `~/.local/share`)`/kingst-la/firmware/`, Windows `%LOCALAPPDATA%\kingst-la\firmware\` | 저장소 밖 |
 | 플랫폼 | 1차 검증은 macOS. 코드는 OS 전용 처리 없이 작성 (펌웨어 경로·libusb 위치만 분기) | Linux는 udev 규칙, Windows는 WinUSB 드라이버가 필요 — 실기 확인 후 README에 안내 |
 | 문턱 전압 | sigrok과 동일: 이산값 0.4/0.6/0.9/1.2/1.4/2.0/2.5/4.0 V, 기본 1.4 V | 연속값·−4~+4 V 확장은 실기 확인 후 |
 | sigrok-cli와 다른 점 | 5.4절에 모아 둔다 | 그 외는 sigrok-cli와 같게 동작해야 한다 |
@@ -46,9 +46,9 @@ Kingst LA5016 로직 분석기를 macOS에서 **pyusb + numpy만으로** 제어�
 ## 3. 모듈 구성
 
 ```
-src/la5016/
+src/kingst_la/
 ├── __init__.py
-├── __main__.py      python -m la5016
+├── __main__.py      python -m kingst_la
 ├── cli.py           sigrok-cli 호환 argparse, 모듈 조립, 종료 코드
 ├── options.py       -c key=value, SI 접미사, --channels, --triggers, --time 파싱 (순수 함수)
 ├── firmware.py      KingstVIS.app → Qt rcc 테이블 탐색 → (zlib) → Intel HEX→blob → 로컬 설치
@@ -119,7 +119,7 @@ class Sink(Protocol):
    (`CMD_FPGA_INIT`, EP2 bulk, 4096 바이트 패딩). 이어 `enable_fpga_bitstream()`.
 6. `REG_RUN` 읽어 `0x85eX`가 아니면 경고. `CMD_BULK_RESET`.
 
-펌웨어 파일이 없으면 USB에 접근하기 전에 중단하고 `la5016 --extract-firmware`를 안내한다.
+펌웨어 파일이 없으면 USB에 접근하기 전에 중단하고 `kla --extract-firmware`를 안내한다.
 
 ### 4.2 설정·캡처 (`Device.acquire(cfg) -> (Meta, Iterator[bytes])`)
 
@@ -228,7 +228,7 @@ golden 파일은 sigrok-cli를 설치하지 않고 **libsigrok 출력 모듈 소
 
 ### 5.4 sigrok-cli와 다른 점
 
-| 항목 | sigrok-cli | la5016 | 이유 |
+| 항목 | sigrok-cli | kla | 이유 |
 |---|---|---|---|
 | `--extract-firmware` | 없음 (별도 스크립트) | 내장 | Mac용 추출기가 sigrok에 없음 |
 | `-o`만 주고 `-O` 생략 | `srzip` | 확장자로 추정 (`.vcd`→vcd, `.csv`→csv, `.bin`→binary), 그 밖(`.sr` 포함)은 srzip | `-o cap.vcd`가 zip이 되는 것보다 덜 놀랍다 |
@@ -282,8 +282,8 @@ golden 파일은 sigrok-cli를 설치하지 않고 **libsigrok 출력 모듈 소
 ### 8.3 첫 연결 검증 절차
 
 1. `system_profiler SPUSBDataType` — 펌웨어 로드 전 VID:PID, iProduct
-2. `la5016 --extract-firmware` — 파일 목록, 크기, SHA-256
-3. `la5016 --scan -l 5` — FX2 업로드·재열거 후 PID, EEPROM magic(**a1/a2**), `REG_RUN`
+2. `kla --extract-firmware` — 파일 목록, 크기, SHA-256
+3. `kla --scan -l 5` — FX2 업로드·재열거 후 PID, EEPROM magic(**a1/a2**), `REG_RUN`
 4. DSO2000 내장 신호 발생기로 1 kHz·1 MHz 구형파 → `-O vcd` 캡처 → 주기·duty 비교 (자동화 스크립트)
 5. 500 MHz / 200 MHz / 최저 samplerate, 트리거 r/f/레벨, captureratio
 6. pyusb 동기 read 처리량(MB/s) 측정 — 2차 스트리밍 방식 판단 근거
@@ -331,7 +331,7 @@ sigrok 디코더 원본(`decoders/*/pd.py`)을 **수정 없이** 실행하는 �
 
 | 항목 | 결정 |
 |---|---|
-| 디코더 원본 | `la5016 --install-decoders`가 libsigrokdecode 고정 커밋(기본 `71f45144…`)의 tarball을 받아 `decoders/`만 사용자 데이터 폴더(`…/la5016/decoders/`, `LA5016_DECODERS_DIR`로 변경 가능)에 설치. 저장소에 넣지 않음 |
+| 디코더 원본 | `kla --install-decoders`가 libsigrokdecode 고정 커밋(기본 `71f45144…`)의 tarball을 받아 `decoders/`만 사용자 데이터 폴더(`…/kingst-la/decoders/`, `KINGST_LA_DECODERS_DIR`로 변경 가능)에 설치. 저장소에 넣지 않음 |
 | 실행 모델 | stack마다 워커 스레드 1개 + 동기 핸드오프 (libsigrokdecode와 같은 의미) |
 | 조건 매칭 | numpy 벡터화, C `find_match`와 같은 의미 |
 | CLI 범위 | `-P`, `-A`, `-B`, `-L`, `--show -P`, `--protocol-decoder-samplenum`. `-M`은 6차(25절), JSON trace는 이후 |
@@ -340,7 +340,7 @@ sigrok 디코더 원본(`decoders/*/pd.py`)을 **수정 없이** 실행하는 �
 ## 12. 모듈
 
 ```
-src/la5016/srd/
+src/kingst_la/srd/
 ├── api.py         sigrokdecode 모듈 대역: 상수, Decoder(register/put/wait/has_channel)
 ├── conditions.py  wait() 조건 → 다음 일치 샘플 찾기 (순수 함수)
 ├── loader.py      디코더 로드·메타데이터 검증·옵션 변환
@@ -349,7 +349,7 @@ src/la5016/srd/
 └── install.py     --install-decoders
 ```
 
-- 로드 시 `sys.modules["sigrokdecode"] = la5016.srd.api`로 등록한다 (같은 이름의 최상위 패키지는 설치하지 않음).
+- 로드 시 `sys.modules["sigrokdecode"] = kingst_la.srd.api`로 등록한다 (같은 이름의 최상위 패키지는 설치하지 않음).
 - 디코더 패키지는 디렉터리 이름으로 `sys.modules`에 등록하고(`spec_from_file_location`), `common.srdhelper` import를 위해
   디코더 폴더를 `sys.path` **끝**에 추가한다 (표준 라이브러리를 가리지 않도록).
 
@@ -436,7 +436,7 @@ stacked decoder의 `decode()` 예외는 sigrok처럼 로그만 남긴다.
 | ≥ 8 | `800 MHz / (분주비 & ~7)` — 예: 20 → 50 MHz, 100 → 8.33 MHz |
 
 libsigrok은 `800 MHz / 분주비`를 실제 레이트로 보고하므로, 1-2-5 목록 밖의 레이트에서는 시간축이 틀린다
-(목록의 레이트는 모두 1, 4, 8의 배수라 맞다). la5016은 `options.hardware_divider()`로 실제 분주비를 계산해
+(목록의 레이트는 모두 1, 4, 8의 배수라 맞다). kingst-la는 `options.hardware_divider()`로 실제 분주비를 계산해
 레지스터에 쓰고, `Meta.samplerate`에 실제 레이트를 넣고, 요청과 다르면 경고한다.
 
 **스트리밍 한계.**
@@ -484,7 +484,7 @@ stream.expand(raw, sink, channels, limit) ─ Deinterleaver: 활성 채널마다
 | Ctrl-C | 8 ch × 20 MHz 무한 스트리밍 → 3 s 뒤 SIGINT → 2.8 s 분량 저장, 종료 0 |
 
 **실제 신호로 재확인 (CH0 1 kHz 사인파, 문턱 0.4 V).** 캡처를 `-O binary`로 받아 FFT 기본 주파수를 구했다.
-la5016이 보고한(실제) 레이트로 계산하면 모든 경우 1000.00 Hz:
+kingst-la가 보고한(실제) 레이트로 계산하면 모든 경우 1000.00 Hz:
 
 | 모드 | 요청 → 실제 레이트 | FFT |
 |---|---|---|
@@ -506,7 +506,7 @@ la5016이 보고한(실제) 레이트로 계산하면 모든 경우 1000.00 Hz:
 
 | 항목 | 내용 |
 |---|---|
-| CLI | `la5016 -g PWM1 -c enabled=on:output_frequency=1k:duty_cycle=25 --set` (sigrok-cli의 `-g`/`--set`). `-g`가 있으면 `-c` 키는 `enabled`, `output_frequency`(SI 접미사, 소수 가능), `duty_cycle`(%, `25%`도 허용) |
+| CLI | `kla -g PWM1 -c enabled=on:output_frequency=1k:duty_cycle=25 --set` (sigrok-cli의 `-g`/`--set`). `-g`가 있으면 `-c` 키는 `enabled`, `output_frequency`(SI 접미사, 소수 가능), `duty_cycle`(%, `25%`도 허용) |
 | 레지스터 | sigrok과 같음. 200 MHz 클럭, `REG_PWM1 0x70`/`REG_PWM2 0x78`에 `(주기 = int(200M/f), high = int(주기×duty/100 + 0.5))` u32 LE, `REG_PWM_EN 0x02` 비트 0/1. 해당 채널 끄기 → 값 쓰기 → 켜기 |
 | 범위 | 200 MHz/2³² (≈0.047 Hz) ~ 20 MHz, duty 0 초과 100 이하 |
 | 기본값 | PWM1 1 kHz, PWM2 100 kHz, duty 50 % (sigrok) |
@@ -519,7 +519,7 @@ la5016이 보고한(실제) 레이트로 계산하면 모든 경우 1000.00 Hz:
 
 - 마지막 설정을 사용자 데이터 폴더의 `pwm.json`에 기록하고, 다른 채널을 바꿀 때 이 기록으로 enable 마스크를 만든다
   (읽어서 만들면 다른 출력이 꺼진다). FPGA 비트스트림을 새로 올리면(전원 재투입) 기록을 지운다.
-- `--show`의 PWM 상태는 "la5016이 마지막으로 설정한 값"이다. KingstVIS 등 다른 프로그램이 바꾼 것은 모른다.
+- `--show`의 PWM 상태는 "kingst-la가 마지막으로 설정한 값"이다. KingstVIS 등 다른 프로그램이 바꾼 것은 모른다.
 - sigrok `check_fpga_bitstream()`은 `REG_PWM_EN & 3 == 0`도 요구하지만, 항상 0으로 읽히므로 이 검사를 뺐다
   (sigrok에서는 결과적으로 같음; PWM이 켜져 있어도 비트스트림을 다시 올리지 않게 하려는 의도를 명시).
 
@@ -540,7 +540,7 @@ la5016이 보고한(실제) 레이트로 계산하면 모든 경우 1000.00 Hz:
 - `timing` 디코더: 999개 주기 전부 `1.000 ms (1.000 kHz)`.
 - 스트리밍 10 MHz × 4 ch 2 s: 1999개 주기 전부 10000 샘플 — 손실·중복 없음.
 - 트리거 `r`/`f` + `-w`: 트리거 직후 High 250샘플(25 %) / Low부터 시작.
-- PWM1 → CH0으로 옮겨 재확인: 1 kHz 25 %에서 `timing` 999개 주기 전부 1.000 ms, 루프백 테스트(`LA5016_TEST_PWM=1`) 통과.
+- PWM1 → CH0으로 옮겨 재확인: 1 kHz 25 %에서 `timing` 999개 주기 전부 1.000 ms, 루프백 테스트(`KINGST_LA_TEST_PWM=1`) 통과.
   PWM1을 2 kHz로 켠 채 PWM2를 켜고 끄는 `--set`을 두 번 실행해도 PWM1은 계속 2 kHz (상태 파일로 enable 마스크 유지).
 
 **찾은 버그:** 스트림을 멈춘 뒤 수신 스레드가 EP6 읽기를 붙잡고 있어, 같은 프로세스의 다음 SDRAM 다운로드 데이터를
