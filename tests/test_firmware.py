@@ -121,6 +121,30 @@ def test_load_missing(tmp_path, monkeypatch):
         fw.load("kingst-la-01a2.fw")
 
 
+def test_load_prefers_user_dir_then_bundled(tmp_path, monkeypatch):
+    user, bundled = tmp_path / "user", tmp_path / "bundled"
+    user.mkdir()
+    bundled.mkdir()
+    (bundled / "a.fw").write_bytes(b"bundled")
+    (bundled / "b.fw").write_bytes(b"bundled")
+    (user / "b.fw").write_bytes(b"user")
+    monkeypatch.delenv("KINGST_LA_FIRMWARE_DIR")
+    monkeypatch.setattr(fw, "firmware_dir", lambda: user)
+    monkeypatch.setattr(fw, "BUNDLED_DIR", bundled)
+    assert fw.load("a.fw") == b"bundled"
+    assert fw.load("b.fw") == b"user"
+    with pytest.raises(fw.FirmwareError, match="--extract-firmware"):
+        fw.load("c.fw")
+
+
+def test_env_dir_excludes_bundled(tmp_path, monkeypatch):
+    (tmp_path / "a.fw").write_bytes(b"bundled")
+    monkeypatch.setattr(fw, "BUNDLED_DIR", tmp_path)
+    monkeypatch.setenv("KINGST_LA_FIRMWARE_DIR", str(tmp_path / "empty"))
+    with pytest.raises(fw.FirmwareError):
+        fw.load("a.fw")
+
+
 def test_names():
     assert fw.mcu_firmware_name(0x01A2) == "kingst-la-01a2.fw"
     assert fw.fpga_bitstream_name("LA5016A1") == "kingst-la5016a1-fpga.bitstream"

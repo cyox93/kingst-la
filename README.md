@@ -20,7 +20,11 @@ The FX2 firmware and FPGA bitstreams belong to Kingst and are not part of this
 repository. `--extract-firmware` copies them out of your own KingstVIS into
 `~/Library/Application Support/kingst-la/firmware/` (Linux: `~/.local/share/kingst-la/firmware/`,
 Windows: `%LOCALAPPDATA%\kingst-la\firmware\`; override with `KINGST_LA_FIRMWARE_DIR`).
-Do not commit or redistribute them.
+Do not commit or redistribute them. Files in that directory take precedence over
+`src/kingst_la/data/firmware/`, which a private build may fill (this repository has none).
+
+`tools/git-hooks/pre-push` refuses to push any history containing firmware to GitHub;
+enable it with `git config core.hooksPath tools/git-hooks`.
 
 ## Use
 

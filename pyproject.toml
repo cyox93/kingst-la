@@ -29,6 +29,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+kingst_la = ["data/firmware/*.fw", "data/firmware/*.bitstream"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not hw and not decoders'"

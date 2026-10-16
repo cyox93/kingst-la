@@ -239,6 +239,10 @@ golden 파일은 sigrok-cli를 설치하지 않고 **libsigrok 출력 모듈 소
 
 ## 6. 펌웨어 추출 (`firmware.py`)
 
+- 찾는 순서 (`firmware.search_dirs()`): `KINGST_LA_FIRMWARE_DIR`가 있으면 그 폴더만. 없으면 사용자 데이터 폴더,
+  그다음 패키지 안 `data/firmware/`(공개 소스에는 없음. 펌웨어를 함께 관리하는 비공개 빌드용, package-data로 설치됨).
+- `tools/git-hooks/pre-push`: GitHub 원격으로 push할 때 히스토리 전체에 `*.fw`, `*.bitstream`, `data/firmware/`가
+  있으면 거부한다 (`git config core.hooksPath tools/git-hooks`).
 - 입력: `KingstVIS.app/Contents/MacOS/KingstVIS` (확인한 버전 v3.6.6, x86_64 전용 Mach-O, 심볼 stripped —
   `_ZL16qt_resource_data/_name/_struct` 심볼 없음). sigrok의 `sigrok-fwextract-kingst-la2016`은
   ELF 심볼로 테이블을 찾으므로 Mac에서는 쓸 수 없다.

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Refuse to push Kingst firmware (proprietary) to a public GitHub remote.
+# Enable once per clone:  git config core.hooksPath tools/git-hooks
+remote="$1"
+url="$2"
+case "$url" in
+  *github.com*) ;;
+  *) exit 0 ;;
+esac
+zero=0000000000000000000000000000000000000000
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue   # deleting a remote branch
+  # Every blob path reachable from the pushed commit, i.e. the whole history.
+  hits=$(git rev-list --objects "$local_sha" | grep -E '\.(fw|bitstream)$|(^| )([^ ]*/)?data/firmware/' | head -5)
+  if [ -n "$hits" ]; then
+    echo "pre-push: refusing to push $local_ref to $remote ($url): its history contains firmware:" >&2
+    echo "$hits" | sed 's/^/  /' >&2
+    status=1
+  fi
+done
+exit $status

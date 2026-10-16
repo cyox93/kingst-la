@@ -46,6 +46,11 @@ class FirmwareError(Exception):
     pass
 
 
+# Firmware shipped inside the package, for builds that may include it; the
+# public source has no such directory and relies on --extract-firmware.
+BUNDLED_DIR = Path(__file__).resolve().parent / "data" / "firmware"
+
+
 def firmware_dir() -> Path:
     """Per-user directory that holds the extracted files."""
     env = os.environ.get("KINGST_LA_FIRMWARE_DIR")
@@ -69,14 +74,22 @@ def fpga_bitstream_name(stem: str) -> str:
     return "kingst-%s-fpga.bitstream" % stem.lower()
 
 
+def search_dirs() -> List[Path]:
+    """Where load() looks: KINGST_LA_FIRMWARE_DIR alone, else the user directory, then the bundled one."""
+    if os.environ.get("KINGST_LA_FIRMWARE_DIR"):
+        return [firmware_dir()]
+    return [firmware_dir(), BUNDLED_DIR]
+
+
 def load(name: str) -> bytes:
-    path = firmware_dir() / name
-    try:
-        return path.read_bytes()
-    except FileNotFoundError:
-        raise FirmwareError(
-            "missing firmware file %s; run 'kla --extract-firmware' first" % path
-        ) from None
+    for d in search_dirs():
+        try:
+            return (d / name).read_bytes()
+        except FileNotFoundError:
+            continue
+    raise FirmwareError(
+        "missing firmware file %s; run 'kla --extract-firmware' first" % (firmware_dir() / name)
+    )
 
 
 # --- Qt rcc tables ---------------------------------------------------------
