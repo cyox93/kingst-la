@@ -23,6 +23,7 @@ class Channel:
 class Meta:
     samplerate: int                       # Hz, the rate the hardware actually runs at
     channels: List[Channel] = field(default_factory=list)  # enabled channels, in output order
+    total_channels: int = 16              # logic channels of the source, enabled or not
 
 
 class Sink(Protocol):

@@ -275,7 +275,7 @@ def test_parse_output_format_options():
         "csv", {"time": "true", "header": "false"})
 
 
-@pytest.mark.parametrize("text", ["", "srzip", "CSV", "csv:time", "bits:width"])
+@pytest.mark.parametrize("text", ["", "sr", "CSV", "csv:time", "bits:width"])
 def test_parse_output_format_invalid(text):
     with pytest.raises(UsageError):
         parse_output_format(text)
@@ -283,15 +283,12 @@ def test_parse_output_format_invalid(text):
 
 @pytest.mark.parametrize("path, expected", [
     ("cap.vcd", "vcd"), ("a/b/cap.csv", "csv"), ("x.bin", "binary"), ("CAP.VCD", "vcd"),
+    ("cap.sr", "srzip"), ("cap", "srzip"), ("cap.txt", "srzip"),
 ])
 def test_format_from_filename(path, expected):
     assert format_from_filename(path) == expected
 
 
-@pytest.mark.parametrize("path", ["cap.sr", "cap", "cap.txt", "vcd", ""])
-def test_format_from_filename_unknown(path):
-    with pytest.raises(UsageError, match="-O"):
-        format_from_filename(path)
 
 
 # --- threshold --------------------------------------------------------------

@@ -12,6 +12,7 @@ from typing import BinaryIO, List, Optional
 import numpy as np
 
 from la5016 import __version__, firmware, options, output, rle, stream
+from la5016 import input as inputs
 from la5016.options import UsageError
 from la5016.pipeline import Channel, Meta, Sink
 
@@ -41,9 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--set", action="store_true", help="apply the -g settings and exit")
     p.add_argument("-t", "--triggers", metavar="LIST", help="e.g. CH0=r,CH1=1 (0, 1, r, f)")
     p.add_argument("-w", "--wait-trigger", action="store_true", help="drop samples before the trigger")
+    p.add_argument("-i", "--input-file", metavar="FILE", help="read samples from a .sr file instead of the device")
+    p.add_argument("-I", "--input-format", metavar="FORMAT", help="srzip (default)")
     p.add_argument("-o", "--output-file", metavar="FILE")
     p.add_argument("-O", "--output-format", metavar="FORMAT[:OPT=VAL]",
-                   help="bits (default), hex, csv, vcd, binary")
+                   help="bits (default on stdout), hex, csv, vcd, binary, srzip (default for -o)")
     p.add_argument("--scan", action="store_true", help="scan for devices")
     p.add_argument("--show", action="store_true", help="show device options")
     p.add_argument("--samples", metavar="N")
@@ -134,7 +137,11 @@ _FORMAT_DESCRIPTIONS = (
     ("bits", "ASCII rendering using 0/1"),
     ("csv", "Comma-separated values"),
     ("hex", "Hexadecimal digits"),
+    ("srzip", "srzip session file format data"),
     ("vcd", "Value Change Dump data"),
+)
+_INPUT_DESCRIPTIONS = (
+    ("srzip", "srzip session file format data"),
 )
 
 
@@ -143,6 +150,9 @@ def cmd_list(args, out) -> int:
     out.write("Supported hardware drivers:\n  %-20s %s\n\n" % (options.DRIVER, "Kingst LA2016"))
     out.write("Supported output formats:\n")
     for name, desc in _FORMAT_DESCRIPTIONS:
+        out.write("  %-20s %s\n" % (name, desc))
+    out.write("\nSupported input formats:\n")
+    for name, desc in _INPUT_DESCRIPTIONS:
         out.write("  %-20s %s\n" % (name, desc))
     out.write("\n")
     infos = []
@@ -357,6 +367,86 @@ class _Interrupts:
         raise KeyboardInterrupt
 
 
+def _output_format(args):
+    if args.output_format:
+        return options.parse_output_format(args.output_format)
+    if args.output_file:
+        return options.format_from_filename(args.output_file), {}
+    return "bits", {}
+
+
+def _open_sink(args, channels: List[Channel]):
+    """Open -o (or stdout) and the -O output or -P decoders writing to it."""
+    fmt, fmt_opts = _output_format(args)
+    if fmt == "srzip" and not args.output_file and not args.protocol_decoders:
+        raise UsageError("output format 'srzip' needs a file (-o FILE)")
+    out: BinaryIO
+    out = open(args.output_file, "wb") if args.output_file else sys.stdout.buffer
+    try:
+        if args.protocol_decoders:
+            sink = _decoder_sink(args, channels, out)
+        else:
+            sink = output.create(fmt, out, fmt_opts)
+    except (ValueError, UsageError) as e:
+        if args.output_file:
+            out.close()
+            os.unlink(args.output_file)
+        raise UsageError(str(e)) from None
+    return out, sink
+
+
+def _close_sink(args, out: BinaryIO, sink, ok: bool) -> None:
+    if not ok and hasattr(sink, "abort"):
+        sink.abort()
+    if args.output_file:
+        out.close()
+        if not ok:
+            os.unlink(args.output_file)
+    else:
+        out.flush()
+
+
+def cmd_input(args) -> int:
+    """-i: run a session file through the outputs or decoders instead of capturing."""
+    device_opts = [flag for flag, given in (
+        ("-d", args.driver), ("-c", args.config), ("-t", args.triggers), ("-w", args.wait_trigger),
+        ("--scan", args.scan), ("--show", args.show)) if given]
+    if device_opts:
+        raise UsageError("%s cannot be used with -i (they configure the device)" % ", ".join(device_opts))
+    if args.samples and args.time:
+        raise UsageError("--samples and --time are mutually exclusive")
+    if args.input_format:
+        name, _, rest = args.input_format.partition(":")
+        name, opts = name.strip(), options.parse_kv(rest)
+        if name not in options.INPUT_FORMATS:
+            raise UsageError("unsupported input format '%s': expected one of %s"
+                             % (name, ", ".join(options.INPUT_FORMATS)))
+        if opts:
+            raise UsageError("input format '%s' has no options" % name)
+    _output_format(args)
+    if args.output_file and os.path.exists(args.output_file) and os.path.exists(args.input_file) \
+            and os.path.samefile(args.output_file, args.input_file):
+        raise UsageError("-o would overwrite the input file")
+    try:
+        src = inputs.open_srzip(args.input_file)
+    except inputs.InputError as e:
+        raise UsageError(str(e)) from None
+    channels = options.select_channels(args.channels, src.channels)
+    limit = options.parse_samples(args.samples) if args.samples else None
+    if args.time:
+        limit = max(1, src.samplerate * options.parse_time_ms(args.time) // 1000)
+
+    out, sink = _open_sink(args, channels)
+    ok = False
+    try:
+        n = src.read(sink, channels, limit)
+        log.info("%d samples read from %s", n, args.input_file)
+        ok = True
+    finally:
+        _close_sink(args, out, sink, ok)
+    return 0
+
+
 def cmd_capture(args, open_device=None) -> int:
     from la5016.device import CaptureConfig
     if open_device is None:
@@ -369,12 +459,7 @@ def cmd_capture(args, open_device=None) -> int:
         raise UsageError("-w/--wait-trigger needs a trigger (-t)")
     if args.samples and args.time:
         raise UsageError("--samples and --time are mutually exclusive")
-    if args.output_format:
-        fmt, fmt_opts = options.parse_output_format(args.output_format)
-    elif args.output_file:
-        fmt, fmt_opts = options.format_from_filename(args.output_file), {}
-    else:
-        fmt, fmt_opts = "bits", {}
+    _output_format(args)
 
     continuous = cfg_in.get("continuous", False)
     rate = cfg_in.get("samplerate", options.STREAM_MAX_SAMPLERATE if continuous else options.MAX_SAMPLERATE)
@@ -400,18 +485,7 @@ def cmd_capture(args, open_device=None) -> int:
         continuous=continuous,
     )
 
-    out: BinaryIO
-    out = open(args.output_file, "wb") if args.output_file else sys.stdout.buffer
-    try:
-        if args.protocol_decoders:
-            sink = _decoder_sink(args, channels, out)
-        else:
-            sink = output.create(fmt, out, fmt_opts)
-    except (ValueError, UsageError) as e:
-        if args.output_file:
-            out.close()
-            os.unlink(args.output_file)
-        raise UsageError(str(e)) from None
+    out, sink = _open_sink(args, channels)
     if args.wait_trigger:
         sink = _WaitTrigger(sink)
 
@@ -437,16 +511,9 @@ def cmd_capture(args, open_device=None) -> int:
         ok = True
         raise
     finally:
-        if not ok and hasattr(sink, "abort"):
-            sink.abort()
         if dev is not None:
             dev.close()
-        if args.output_file:
-            out.close()
-            if not ok:
-                os.unlink(args.output_file)
-        else:
-            out.flush()
+        _close_sink(args, out, sink, ok)
     return 0
 
 
@@ -470,6 +537,12 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
             raise UsageError("-A/-B need protocol decoders (-P)")
         if args.show and args.protocol_decoders:
             return cmd_show_decoders(args, sys.stdout)
+        if args.input_file:
+            if args.channel_group or args.set:
+                raise UsageError("-g/--set cannot be used with -i")
+            return cmd_input(args)
+        if args.input_format:
+            raise UsageError("-I needs an input file (-i)")
         if args.channel_group:
             if not args.set:
                 raise UsageError("-g %s needs --set (configure the generator, then capture in a "

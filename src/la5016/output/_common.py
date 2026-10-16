@@ -14,8 +14,6 @@ import numpy as np
 
 from .. import __version__
 
-# Logic channels the device (sdi->channels) has; libsigrok prints "n/16".
-DEVICE_CHANNELS = 16
 # Driver longname of libsigrok's kingst-la2016 driver (CSV header).
 DRIVER_LONGNAME = "Kingst LA2016"
 # Replaces "libsigrok <version>" wherever libsigrok prints its version.

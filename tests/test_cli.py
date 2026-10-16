@@ -62,7 +62,7 @@ def test_time_converts_to_samples(capsysbinary):
     ["--samples", "10", "-t", "CH0=e"],
     ["--samples", "10", "-w"],
     ["--samples", "10", "-c", "voltage_threshold=1.5-1.5"],
-    ["--samples", "10", "-o", "x.txt"],
+    ["--samples", "10", "-O", "srzip"],
     ["--samples", "10", "-O", "vcd:bogus=1"],
     ["-d", "fx2lafw", "--scan"],
 ])
@@ -182,11 +182,14 @@ def _stream_words(samples, channels):
     return out
 
 
+STALE = b"\xff\xff\x00\xff"   # one-channel streams drop their first two words
+
+
 def test_stream_to_csv(capsysbinary):
     t = FakeTransport()
     samples = [i % 2 for i in range(48)]
-    raw = _stream_words(samples, [0])
-    t.stream_data = [raw[:5], raw[5:]]
+    raw = STALE + _stream_words(samples, [0])
+    t.stream_data = [raw[:3], raw[3:5], raw[5:]]
     rc = cli.main(["-c", "continuous=on:samplerate=1m", "--samples", "40", "-C", "CH0",
                    "-O", "csv:header=false:label=off"], open_device=_opener(t))
     assert rc == 0
@@ -196,7 +199,7 @@ def test_stream_to_csv(capsysbinary):
 
 def test_stream_break_off_keeps_output_and_fails(tmp_path):
     t = FakeTransport()
-    t.stream_data = [_stream_words([1] * 32, [0])]
+    t.stream_data = [STALE + _stream_words([1] * 32, [0])]
     t.stream_error = "stream stopped: no data"
     path = tmp_path / "s.csv"
     rc = cli.main(["-c", "continuous=on:samplerate=1m", "-C", "CH0", "-O", "csv:header=false:label=off",
@@ -215,7 +218,7 @@ def test_stream_usage_errors(argv):
 
 def test_stream_default_samplerate_is_100m(capsysbinary):
     t = FakeTransport()
-    t.stream_data = [_stream_words([0] * 16, [0])]
+    t.stream_data = [STALE + _stream_words([0] * 16, [0])]
     assert cli.main(["-c", "continuous=on", "--samples", "16", "-C", "CH0", "-O", "vcd"],
                     open_device=_opener(t)) == 0
     assert b"at 100 MHz" in capsysbinary.readouterr().out

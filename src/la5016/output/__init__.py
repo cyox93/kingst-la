@@ -1,4 +1,4 @@
-"""sigrok-compatible output formats (bits, hex, csv, vcd, binary).
+"""sigrok-compatible output formats (bits, hex, csv, vcd, binary, srzip).
 
 Each format follows the libsigrok module src/output/<name>.c and writes
 bytes to a binary stream through the pipeline Sink interface.
@@ -13,6 +13,7 @@ from .binary import BinaryOutput
 from .bits import BitsOutput
 from .csv import CsvOutput
 from .hex import HexOutput
+from .srzip import SrzipOutput
 from .vcd import VcdOutput
 
 FORMATS: Dict[str, type] = {
@@ -21,6 +22,7 @@ FORMATS: Dict[str, type] = {
     "csv": CsvOutput,
     "vcd": VcdOutput,
     "binary": BinaryOutput,
+    "srzip": SrzipOutput,
 }
 
 
@@ -35,4 +37,4 @@ def create(name: str, out: BinaryIO, options: Optional[Mapping[str, str]] = None
 
 
 __all__ = ["FORMATS", "create", "BitsOutput", "HexOutput", "CsvOutput",
-           "VcdOutput", "BinaryOutput"]
+           "VcdOutput", "BinaryOutput", "SrzipOutput"]

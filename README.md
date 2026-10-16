@@ -28,6 +28,7 @@ la5016 -c samplerate=1m --samples 100k -C CH0,CH1=SDA -O vcd -o cap.vcd
 la5016 -c samplerate=100m:captureratio=20 -t CH0=r --time 10ms -O csv
 la5016 -c voltage_threshold=0.6-0.6 --samples 1m -C CH0 -O bits
 la5016 -c samplerate=500m -o cap.vcd     # no limit: stops when memory is full or on Ctrl-C
+la5016 -c samplerate=10m --samples 10m -o cap.sr   # sigrok session file, opens in PulseView
 ```
 
 | Option | |
@@ -40,8 +41,9 @@ la5016 -c samplerate=500m -o cap.vcd     # no limit: stops when memory is full o
 | `-C` | `CH0,CH3-CH5,CH7=NAME` |
 | `-t` | `CH0=r,CH1=1`: levels `0`/`1` plus one edge `r`/`f` |
 | `-w` | drop samples before the trigger |
-| `-O` | `bits` (default), `hex`, `csv`, `vcd`, `binary`, with `:opt=value` options as in sigrok |
-| `-o FILE` | without `-O` the format follows the extension (`.vcd`, `.csv`, `.bin`) |
+| `-O` | `bits` (default on stdout), `hex`, `csv`, `vcd`, `binary`, `srzip`, with `:opt=value` options as in sigrok |
+| `-o FILE` | without `-O` the format follows the extension (`.vcd`, `.csv`, `.bin`); anything else, `.sr` included, is srzip as in sigrok-cli |
+| `-i FILE` | read a `.sr` file instead of the device (see below) |
 | `-l 0..5` | log level; 3 shows progress, 4 adds USB register traffic |
 
 ### Protocol decoders
@@ -62,6 +64,19 @@ The decoders are libsigrokdecode's own Python files, run unmodified by a pure Py
 `sigrokdecode` engine (no libsigrokdecode build needed). With `-P` the logic output is
 replaced by decoder output, as in sigrok-cli. `--protocol-decoder-samplenum` prefixes each
 annotation with its sample range; `-l 3`/`-l 4` add quotes, class ids and short texts.
+
+### Session files
+
+```sh
+la5016 -i cap.sr -O vcd -o cap.vcd                     # convert
+la5016 -i cap.sr -P uart:rx=CH0:baudrate=115200        # decode again without the device
+la5016 -i pulseview.sr -C D0=CLK,D1 --samples 100k -O csv
+```
+
+`-o x.sr` writes sigrok's srzip format, the same files PulseView and libsigrok's `kingst-la2016`
+driver save, and `-i` reads them back, also files from other analyzers (up to their first 16
+channels). With `-i`, `-C` names the file's channels (or `CHn` for bit n), and `--samples`/`--time`
+take the first part. The trigger position is not stored in srzip.
 
 ### PWM outputs
 

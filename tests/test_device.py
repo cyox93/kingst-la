@@ -166,6 +166,19 @@ def test_stream_setup_order_and_read_size():
     assert t.writes(d.REG_RUN)[-1] == bytes([d.RUNMODE_HALT])
 
 
+@pytest.mark.parametrize("mask, chunks, expected", [
+    (0b1, [b"\x01", b"\x02\x03", b"\x04\x05\x06"], [b"\x05\x06"]),   # first 4 bytes dropped
+    (0b1, [b"\x01\x02\x03\x04", b"\x05\x06"], [b"\x05\x06"]),
+    (0b11, [b"\x01\x02", b"\x03\x04"], [b"\x01\x02", b"\x03\x04"]),   # kept with 2+ channels
+])
+def test_stream_drops_stale_words_of_one_channel(mask, chunks, expected):
+    t = FakeTransport()
+    t.stream_data = chunks
+    st = d.Device(t).stream(d.CaptureConfig(samplerate=1_000_000, channel_mask=mask))
+    assert list(st) == expected
+    st.stop()
+
+
 def test_stream_rejects_trigger_and_fast_rates():
     with pytest.raises(d.DeviceError):
         d.Device(FakeTransport()).stream(d.CaptureConfig(samplerate=200_000_000, channel_mask=1))

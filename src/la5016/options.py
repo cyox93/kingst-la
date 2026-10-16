@@ -19,8 +19,9 @@ class UsageError(ValueError):
 
 
 DRIVER = "kingst-la2016"
-OUTPUT_FORMATS = ("bits", "hex", "csv", "vcd", "binary")
-_EXT_FORMATS = {".vcd": "vcd", ".csv": "csv", ".bin": "binary"}
+OUTPUT_FORMATS = ("bits", "hex", "csv", "vcd", "binary", "srzip")
+INPUT_FORMATS = ("srzip",)
+_EXT_FORMATS = {".vcd": "vcd", ".csv": "csv", ".bin": "binary", ".sr": "srzip"}
 
 THRESHOLDS = (0.4, 0.6, 0.9, 1.2, 1.4, 2.0, 2.5, 4.0)  # volts, hardware presets
 DEFAULT_THRESHOLD = 1.4
@@ -161,6 +162,61 @@ def parse_channels(text: Optional[str], total: int = 16) -> List[Channel]:
     return chans
 
 
+def select_channels(text: Optional[str], available: List[Channel]) -> List[Channel]:
+    """-C value over the channels of an input file. None keeps them all.
+
+    Items name a channel by its name in the file or as "CHn" (bit n), as
+    ranges "CHa-CHb" (the file's channels in between), or rename it with
+    "NAME=NEW".
+    """
+    if text is None:
+        return list(available)
+    if not text.strip():
+        raise UsageError("empty channel list")
+    by_name = {c.name: c for c in available}
+    by_index = {c.index: c for c in available}
+    names = ", ".join(c.name for c in available)
+
+    def find(spec: str) -> Channel:
+        spec = spec.strip()
+        if spec in by_name:
+            return by_name[spec]
+        m = _CH_RE.fullmatch(spec)
+        if m and int(m.group(1)) in by_index:
+            return by_index[int(m.group(1))]
+        raise UsageError(f"no channel '{spec}' in the input file (channels: {names})")
+
+    chans: List[Channel] = []
+    for item in text.split(","):
+        item = item.strip()
+        if not item:
+            raise UsageError(f"empty item in channel list '{text}'")
+        spec, sep, new = item.partition("=")
+        if spec not in by_name and "-" in spec:
+            if sep:
+                raise UsageError(f"cannot rename a channel range: '{item}'")
+            a_text, _, b_text = spec.partition("-")
+            a, b = find(a_text).index, find(b_text).index
+            if a > b:
+                raise UsageError(f"invalid channel range '{item}': start is after end")
+            chans.extend(c for c in available if a <= c.index <= b)
+            continue
+        ch = find(spec)
+        new = new.strip()
+        if sep and not new:
+            raise UsageError(f"empty channel name in '{item}'")
+        chans.append(Channel(ch.index, new) if sep else ch)
+    seen_idx, seen_name = set(), set()
+    for c in chans:
+        if c.index in seen_idx:
+            raise UsageError(f"channel '{by_index[c.index].name}' given more than once")
+        if c.name in seen_name:
+            raise UsageError(f"channel name '{c.name}' used more than once")
+        seen_idx.add(c.index)
+        seen_name.add(c.name)
+    return chans
+
+
 def parse_triggers(text: str, channels: List[Channel]) -> Dict[int, str]:
     """"CH0=r,CH1=1" -> {0: "r", 1: "1"} over enabled channels.
 
@@ -202,13 +258,8 @@ def parse_output_format(text: str) -> Tuple[str, Dict[str, str]]:
 
 
 def format_from_filename(path: str) -> str:
-    """Guess the output format from the -o extension."""
-    ext = os.path.splitext(path)[1].lower()
-    if ext not in _EXT_FORMATS:
-        raise UsageError(
-            f"cannot guess output format from '{path}': pass -O "
-            f"({', '.join(OUTPUT_FORMATS)})")
-    return _EXT_FORMATS[ext]
+    """Guess the output format from the -o extension; srzip otherwise, as sigrok-cli."""
+    return _EXT_FORMATS.get(os.path.splitext(path)[1].lower(), "srzip")
 
 
 def parse_threshold(text: str) -> float:

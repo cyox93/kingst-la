@@ -12,7 +12,7 @@ from typing import BinaryIO, List, Mapping, Optional
 import numpy as np
 
 from ..pipeline import Meta
-from ._common import (DEVICE_CHANNELS, PACKAGE_VERSION, as_samples,
+from ._common import (PACKAGE_VERSION, as_samples,
                       parse_options, samplerate_string)
 
 
@@ -82,7 +82,7 @@ class LineOutput:
     def _header(self) -> bytes:
         assert self.meta is not None, "begin() not called"
         s = f"{PACKAGE_VERSION}\n"
-        s += f"Acquisition with {len(self.meta.channels)}/{DEVICE_CHANNELS} channels"
+        s += f"Acquisition with {len(self.meta.channels)}/{self.meta.total_channels} channels"
         if self.meta.samplerate:
             s += f" at {samplerate_string(self.meta.samplerate)}"
         return (s + "\n").encode()

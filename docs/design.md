@@ -26,7 +26,7 @@ Kingst LA5016 로직 분석기를 macOS에서 **pyusb + numpy만으로** 제어�
 | 프로토콜 디코더 `-P` | 순수 Python `sigrokdecode` 호환 계층으로 sigrok 디코더 원본을 그대로 불러오는 방향. 1차 파이프라인의 Sink로 붙인다 |
 | 연속 스트리밍 `-c continuous=on` | 4.5절의 경계를 지켜 두면 소스와 USB 수신부만 추가하면 된다 |
 | PWM 출력 | 2차에 `-c` 설정 키로 추가 |
-| `-i` 파일 입력, `srzip` 출력 | |
+| `-i` 파일 입력, `srzip` 출력 | 5차 (23절) |
 
 ## 2. 결정 사항
 
@@ -186,7 +186,7 @@ LA5016(16 ch) 레이아웃: **transfer 16 B = 5 × (u16 핀값 LE, u8 반복수)
 | `-C, --channels` | `-C CH0,CH3-CH5`, `-C CH3=SDA` | 이름 바꾸기 지원 |
 | `-t, --triggers` | `-t CH0=r,CH1=1` | `0/1/r/f`. 엣지는 1개만. `e`는 오류 |
 | `-w, --wait-trigger` | | 트리거 이전 샘플 버림 |
-| `-o, --output-file` | `-o cap.vcd` | 없으면 stdout. `-O` 없으면 확장자로 형식 추정 (5.4절) |
+| `-o, --output-file` | `-o cap.vcd` | 없으면 stdout. `-O` 없으면 확장자로 형식 추정, 모르면 srzip (5.4절) |
 | `-O, --output-format` | `-O csv:time=true` | 기본 `bits`. 형식 옵션은 `:key=value` |
 | `-l, --loglevel` | `-l 5` | 0–5. 5에서 USB 요청 덤프 |
 | `-V, --version` | | |
@@ -231,9 +231,10 @@ golden 파일은 sigrok-cli를 설치하지 않고 **libsigrok 출력 모듈 소
 | 항목 | sigrok-cli | la5016 | 이유 |
 |---|---|---|---|
 | `--extract-firmware` | 없음 (별도 스크립트) | 내장 | Mac용 추출기가 sigrok에 없음 |
-| `-o`만 주고 `-O` 생략 | `srzip` | 확장자로 추정 (`.vcd`→vcd, `.csv`→csv, `.bin`→binary), 모르는 확장자면 사용 오류 | 1차는 srzip 미지원 |
+| `-o`만 주고 `-O` 생략 | `srzip` | 확장자로 추정 (`.vcd`→vcd, `.csv`→csv, `.bin`→binary), 그 밖(`.sr` 포함)은 srzip | `-o cap.vcd`가 zip이 되는 것보다 덜 놀랍다 |
 | 지원 드라이버 | 다수 | `kingst-la2016` (LA5016)만 | |
-| 출력 형식 | 다수 | bits, hex, csv, vcd, binary | |
+| 출력 형식 | 다수 | bits, hex, csv, vcd, binary, srzip | |
+| 입력 형식 | 다수 | srzip만 | |
 | `--time` | 드라이버의 msec 한도(시간이 되면 HALT) | 샘플 수로 변환해 하드웨어 한도로 설정 | 길이가 정확하고 폴링 지연과 무관 |
 
 ## 6. 펌웨어 추출 (`firmware.py`)
@@ -545,3 +546,61 @@ la5016이 보고한(실제) 레이트로 계산하면 모든 경우 1000.00 Hz:
 **찾은 버그:** 스트림을 멈춘 뒤 수신 스레드가 EP6 읽기를 붙잡고 있어, 같은 프로세스의 다음 SDRAM 다운로드 데이터를
 가로챘다 (CLI는 매번 프로세스가 끝나 드러나지 않았음). `Stream.stop()`이 스레드 종료를 기다리게 하고 읽기 시간 초과를
 데이터 속도에 맞춰(최소 250 ms) 줄였다. SDRAM/스트리밍 교대 30회 모두 정상.
+
+---
+
+# 5차: `.sr`(srzip) 저장과 `-i` 입력
+
+- 작성: 2026-10-17
+- 근거: libsigrok `src/output/srzip.c`, `src/session_file.c`(`sr_session_load`), `src/session_driver.c`
+
+## 23. 형식과 동작
+
+**파일 구조.** zip(deflate) 안에
+
+| 항목 | 내용 |
+|---|---|
+| `version` | `2` |
+| `metadata` | GKeyFile. `[global] sigrok version=…`, `[device 1]`에 `capturefile=logic-1`, `total probes`, `samplerate`(`sr_samplerate_string`, 예 `12.208 kHz`), `total analog=0`, 켠 채널만 `probe<index+1>=이름`, 데이터가 있으면 `unitsize` |
+| `logic-1-1`, `logic-1-2`, … | 원시 샘플, 4 MiB 단위. 샘플마다 장치의 모든 비트(LA5016은 2바이트 LE, 비트 i = CHi) |
+
+- 꺼진 채널 비트는 0으로 지운다. 트리거 위치는 형식에 없으므로 저장되지 않는다 (sigrok도 같음).
+- metadata는 마지막에 쓴다. libsigrok은 처음에 쓰고 첫 데이터에서 `unitsize`를 넣어 교체하는데, 결과는 같다
+  (읽는 쪽은 이름으로 찾는다). 데이터가 0개면 `unitsize`가 없는 것도 같다.
+- 표준 출력이나 seek가 안 되는 스트림에는 쓸 수 없다 (`needs a file (-o FILE)`).
+- `Meta.total_channels`(기본 16)를 새로 두어, 입력 파일의 채널 수가 `total probes`·`unitsize`와
+  bits/hex/csv/vcd 헤더의 `n/16`에 그대로 반영된다.
+
+**입력 (`-i FILE [-I srzip]`).** `input/srzip.py`
+
+- version 1·2. `capturefile` 이름의 단일 항목이 있으면 그것, 없으면 `<이름>-1`, `-2`, … 를 빠지는 번호까지 읽는다.
+- unitsize는 1~N 모두 받는다. 샘플을 uint16으로 만들므로 probe 17 이상이 켜진 파일은 오류.
+  항목 경계가 샘플 경계와 달라도 되고, 끝의 불완전한 샘플은 버린다 (session_driver.c와 같음).
+- GKeyFile 이스케이프(`\s \n \t \r \\`)와 `#` 주석 처리. samplerate는 `sr_parse_sizestring`처럼 `1 MHz`, `20k`, `500000`.
+- `-C`는 파일의 채널 이름 또는 `CHn`(비트 n)으로 고르고 `이름=새이름`으로 바꾼다 (`options.select_channels`).
+- `--samples`·`--time`은 앞부분만 처리. `-d`·`-c`·`-t`·`-w`·`-g`·`--set`·`--scan`·`--show`와 함께 쓰면 사용 오류.
+  `-o`가 입력 파일 자체면 오류(덮어쓰기 방지).
+- 출력·`-P` 디코더는 장치 캡처와 같은 Sink 경로를 쓴다.
+
+## 24. 검증 (2026-10-17, PWM1 → CH0)
+
+| 항목 | 결과 |
+|---|---|
+| SDRAM 1 MHz 2 M 샘플 → `.sr` (12.7 KB) → `-i … -P timing` | 2000개 high 250 µs, 1999개 low 750 µs |
+| 스트리밍 → `.sr` 3 s: 4 ch × 10 MHz, 1 ch × 50 MHz, 1 ch × 100 MHz | 모두 실시간으로 저장 (3.3 s), 100 MHz 3억 샘플 605 KB |
+| 100 MHz 3억 샘플 재검사 | 펄스 폭 25000/75000 샘플뿐 (한 번은 에지 바운스 1·8샘플, 합은 정확히 한 주기) |
+
+**찾은 하드웨어 현상: 1채널 스트림의 시작 워드.** 위 검사에서 맨 앞 32샘플 안에 16샘플짜리 펄스가 보였다.
+PWM 주기 10샘플 신호로 위상을 맞춰 보면, 1채널 스트림의 **앞 1~2워드(최대 32샘플)는 올바른 파형이지만 그 뒤와
+위상이 이어지지 않는다** — 그보다 이른 시점의 샘플이고 그 뒤에 시간 공백이 있다.
+
+| 조건 | 빈도 |
+|---|---|
+| 1채널, 1/10/50/100 MHz | 약 10–40 % (실행마다 0, 1 또는 2워드) |
+| 2·4·8채널 | 75회 중 0 |
+| RUN과 BULK_START 순서를 바꿔도 | 같음 |
+| 직전 실행에서 받은 워드 수와 | 상관 없음 |
+
+원인은 FPGA/FX2 내부라 알 수 없다 (sigrok도 같은 순서로 시작하므로 같은 현상이 있을 것). 1채널 스트림에서 앞 4바이트를
+버린다 (`STREAM_SKIP_ONE_CHANNEL`). 시작이 32샘플 늦어질 뿐이다. 수정 후 10/50/100 MHz 1채널 80회 모두 위상 연속,
+`test_pwm_one_channel_stream_starts_in_phase`는 수정 전 코드에서 실패하고 수정 후 통과한다.

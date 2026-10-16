@@ -14,7 +14,7 @@ from typing import BinaryIO, Mapping, Optional
 import numpy as np
 
 from ..pipeline import Meta
-from ._common import (DEVICE_CHANNELS, PACKAGE_VERSION, as_samples, assemble,
+from ._common import (PACKAGE_VERSION, as_samples, assemble,
                       channel_bits, const_block, ctime_now, parse_options,
                       period_string, samplerate_string, uint_block)
 
@@ -75,7 +75,7 @@ class VcdOutput:
             f"$date {ctime_now()} $end",
             f"$version {PACKAGE_VERSION} $end",
             "$comment",
-            f"  Acquisition with {len(m.channels)}/{DEVICE_CHANNELS} channels"
+            f"  Acquisition with {len(m.channels)}/{m.total_channels} channels"
             f" at {samplerate_string(m.samplerate)}",
             "$end",
             f"$timescale {period_string(1, self.period)} $end",

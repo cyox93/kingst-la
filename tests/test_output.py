@@ -201,16 +201,16 @@ def test_csv_time_scale_500mhz():
 # ---- options ---------------------------------------------------------------
 
 def test_formats():
-    assert set(FORMATS) == {"bits", "hex", "csv", "vcd", "binary"}
+    assert set(FORMATS) == {"bits", "hex", "csv", "vcd", "binary", "srzip"}
     with pytest.raises(ValueError, match="unknown output format"):
-        create("srzip", io.BytesIO(), {})
+        create("sr", io.BytesIO(), {})
 
 
 @pytest.mark.parametrize("fmt,accepted", [
     ("bits", "width"), ("hex", "width"),
     ("csv", "gnuplot, scale, value, record, frame, comment, header, label, time, "
             "trigger, dedup"),
-    ("vcd", "(none)"), ("binary", "(none)"),
+    ("vcd", "(none)"), ("binary", "(none)"), ("srzip", "(none)"),
 ])
 def test_unknown_option(fmt, accepted):
     with pytest.raises(ValueError) as exc:

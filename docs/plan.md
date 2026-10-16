@@ -63,3 +63,16 @@
 | 1 | 레지스터 계산·설정 순서·상태 파일 | `device.py` `pwm_registers`, `set_pwm`, `pwm.json` | FakeTransport |
 | 2 | `-g`/`--set`, `--show` PWM 상태 | `options.py`, `cli.py` | 가짜 장치 end-to-end |
 | 3 | 루프백 | `tests/test_hw.py` (`LA5016_TEST_PWM=1|2`, PWMx → CH0) | 주파수·duty, 스트리밍 연속성 |
+
+---
+
+# 5차 구현 계획 — srzip 저장과 `-i` 입력
+
+| # | 작업 | 파일 | 검증 |
+|---|---|---|---|
+| 1 | srzip 출력 | `output/srzip.py`, `Meta.total_channels` | metadata 문자열 비교, 4 MiB 분할, unitsize 1 |
+| 2 | srzip 입력 | `input/srzip.py` | 왕복, 단일 `logic-1`·version 1·unitsize 4·이스케이프, 잘못된 파일 |
+| 3 | `-C` over 파일 채널 | `options.select_channels` | 이름/`CHn`/범위/이름 바꾸기 |
+| 4 | CLI `-i`/`-I`, `-o` 기본 srzip, `-L` 입력 형식 | `cli.py` | 캡처 → `.sr` → `-i` csv/bits/vcd/`-P` |
+| 5 | 실기 | `.sr` 저장·재생, 스트리밍 저장 실시간성 | PWM1 루프백, 1채널 시작 워드 테스트 |
+

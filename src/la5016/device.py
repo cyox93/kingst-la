@@ -52,6 +52,9 @@ POLL_INTERVAL = 0.05
 
 NUM_SAMPLES_MAX = 10 * 1000 * 1000 * 1000
 STREAM_MBPS_MAX = 200       # USB stream bandwidth limit (samplerate x enabled channels)
+# A one-channel stream sometimes starts with up to two words (32 samples)
+# taken before a gap in time; they are dropped (measured, see docs/design.md 24).
+STREAM_SKIP_ONE_CHANNEL = 4
 BASECLOCK = 800_000_000
 MAX_SAMPLERATE = 500_000_000
 MEMORY_BITS = 2  # Gbit
@@ -447,7 +450,14 @@ class Stream:
         self._stopped = False
 
     def __iter__(self):
-        return iter(self.reader)
+        skip = STREAM_SKIP_ONE_CHANNEL if len(self.channels) == 1 else 0
+        for raw in self.reader:
+            if skip:
+                n = min(skip, len(raw))
+                raw, skip = raw[n:], skip - n
+                if not raw:
+                    continue
+            yield raw
 
     def stop(self) -> None:
         """Halt sampling and wait for the reader thread to end.

@@ -144,3 +144,24 @@ def test_pwm_streaming_loopback(dev):
     ch0 = (np.concatenate(sink.parts) & 1).astype(np.int8)
     periods = np.diff(np.flatnonzero(np.diff(ch0) == 1))
     assert len(periods) >= 998 and set(periods.tolist()) == {10_000}   # no lost or repeated data
+
+
+@needs_pwm
+@pytest.mark.parametrize("rate", [10_000_000, 100_000_000])
+def test_pwm_one_channel_stream_starts_in_phase(dev, rate):
+    # A one-channel stream may begin with two words from before a time gap; they must be dropped.
+    from la5016 import stream as lstream
+    dev.set_pwm(PWM - 1, True, rate // 10, 30)
+    try:
+        for _ in range(10):
+            st = dev.stream(CaptureConfig(samplerate=rate, channel_mask=1, threshold=THRESHOLD))
+            sink = Collect()
+            try:
+                lstream.expand(st, sink, st.channels, limit_samples=4096)
+            finally:
+                st.stop()
+            ch0 = np.concatenate(sink.parts) & 1
+            period = ch0[2000:2010]
+            assert (ch0 == np.resize(np.roll(period, 2000 % 10), len(ch0))).all()
+    finally:
+        dev.set_pwm(PWM - 1, False)
