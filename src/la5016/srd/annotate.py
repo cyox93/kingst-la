@@ -1,13 +1,13 @@
-"""sigrok-cli style decoder output: annotation lines, -A/-B selection, -L, --show -P.
+"""sigrok-cli style decoder output: annotation lines, -A/-B/-M selection, -L, --show -P.
 
-Follows sigrok-cli decode.c (show_pd_annotations, show_pd_binary,
-setup_pd_annotations, setup_pd_binary) and show.c. GPL-3.0-or-later.
+Follows sigrok-cli decode.c (show_pd_annotations, show_pd_binary, show_pd_meta,
+setup_pd_annotations, setup_pd_binary, setup_pd_meta) and show.c. GPL-3.0-or-later.
 """
 
 from __future__ import annotations
 
 import re
-from typing import BinaryIO, Dict, List, Optional, Sequence, TextIO
+from typing import BinaryIO, Dict, List, Optional, Sequence, Set, TextIO
 
 from la5016.srd.loader import DecoderInfo, LoadError
 from la5016.srd.session import Callbacks, Instance
@@ -73,6 +73,28 @@ def parse_binary(text: str, infos: Dict[str, DecoderInfo]) -> Dict[str, int]:
     return out
 
 
+def parse_meta(text: str, infos: Dict[str, DecoderInfo]) -> Set[str]:
+    """-M value -> decoder ids whose meta output is shown (sigrok-cli setup_pd_meta())."""
+    out: Set[str] = set()
+    for tok in text.split(","):
+        if not tok:
+            break
+        if tok not in infos:
+            raise LoadError("Protocol decoder '%s' not found." % tok)
+        out.add(tok)
+    return out
+
+
+def gvariant_number(v) -> str:
+    """g_variant_print() of an int64 or double meta value, without type annotation."""
+    if isinstance(v, int):
+        return "%d" % v
+    s = "%.17g" % v                      # g_ascii_dtostr()
+    if not any(c in s for c in ".enN"):
+        s += ".0"
+    return s
+
+
 class AnnotationPrinter(Callbacks):
     def __init__(self, out: TextIO, visible: Dict[str, List[int]], samplenum: bool = False, loglevel: int = 2):
         self.out = out
@@ -109,6 +131,22 @@ class BinaryWriter(Callbacks):
         if sel is None or (sel != ALL and sel != cls):
             return
         self.out.write(data)
+        self.out.flush()
+
+
+class MetaPrinter(Callbacks):
+    """-M: "[ss-es ]proto_id: name: value" lines, as sigrok-cli show_pd_meta()."""
+
+    def __init__(self, out: TextIO, visible: Set[str], samplenum: bool = False, loglevel: int = 2):
+        self.out = out
+        self.visible = visible
+        self.show_snum = samplenum or loglevel > 2
+
+    def meta(self, inst: Instance, proto_id, ss, es, name, value):
+        if inst.info.id not in self.visible:
+            return
+        snum = "%d-%d " % (ss, es) if self.show_snum else ""
+        self.out.write("%s%s: %s: %s\n" % (snum, proto_id, name, gvariant_number(value)))
         self.out.flush()
 
 

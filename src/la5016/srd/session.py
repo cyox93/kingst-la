@@ -134,8 +134,15 @@ class Instance:
                 return None
             self.callbacks.binary(self, out.proto_id, ss, es, data[0], bytes(data[1]))
         elif out.type == api.OUTPUT_META:
-            if type(data) is not out.meta[0]:
-                raise TypeError("Wrong type for meta output %s" % out.meta[1])
+            # convert_meta(): PyLong_Check / PyFloat_Check, so bool and float subclasses pass.
+            if out.meta[0] is int:
+                if not isinstance(data, int):
+                    raise TypeError("This output was registered as 'int', but something else was passed.")
+                data = int(data)
+            else:
+                if not isinstance(data, float):
+                    raise TypeError("This output was registered as 'float', but something else was passed.")
+                data = float(data)
             self.callbacks.meta(self, out.proto_id, ss, es, out.meta[1], data)
         return None
 

@@ -240,3 +240,12 @@ def test_show_and_list_text(decoders):
     assert "Optional channels:\n- x (X): extra\n" in text
     assert "Documentation:\nedges decoder.\n" in text
     assert annotate.list_text([info]) == "Supported protocol decoders:\n  %-20s %s\n\n" % ("edges", "Edge lister")
+
+
+@pytest.mark.parametrize("value, text", [
+    (115200, "115200"), (-3, "-3"), (115200.0, "115200.0"), (0.1, "0.10000000000000001"),
+    (2.5, "2.5"), (1e300, "1.0000000000000001e+300"), (1e-5, "1.0000000000000001e-05"),
+    (float("inf"), "inf"), (float("-inf"), "-inf"), (float("nan"), "nan"),
+])
+def test_gvariant_number(value, text):
+    assert annotate.gvariant_number(value) == text

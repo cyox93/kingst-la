@@ -103,6 +103,7 @@ class Decoder(srd.Decoder):
     channels = ({'id': 'd', 'name': 'D', 'desc': 'data'},)
     annotations = (('edge', 'Edge'), ('level', 'Level'))
     binary = (('raw', 'Raw'),)
+    options = ({'id': 'bad', 'desc': 'Wrong meta type', 'default': 'no', 'values': ('no', 'yes')},)
 
     def reset(self):
         pass
@@ -110,10 +111,16 @@ class Decoder(srd.Decoder):
     def start(self):
         self.out_ann = self.register(srd.OUTPUT_ANN)
         self.out_bin = self.register(srd.OUTPUT_BINARY)
+        self.out_count = self.register(srd.OUTPUT_META, meta=(int, 'Edges', 'Edges so far'))
+        self.out_rate = self.register(srd.OUTPUT_META, meta=(float, 'Rate', 'Edges per sample'))
 
     def decode(self):
+        n = 0
         while True:
             pins = self.wait({0: 'e'})
+            n += 1
+            self.put(0, self.samplenum, self.out_count, n)
+            self.put(0, self.samplenum, self.out_rate, n if self.options['bad'] == 'yes' else n / self.samplenum)
             self.put(self.samplenum, self.samplenum, self.out_ann, [0, ['edge %d' % pins[0]]])
             self.put(self.samplenum, self.samplenum, self.out_ann, [1, ['L%d' % pins[0]]])
             self.put(self.samplenum, self.samplenum, self.out_bin, [0, b'%d' % pins[0]])
@@ -161,6 +168,37 @@ def test_decoder_samplenum_and_binary_file(toggles, tmp_path, capsysbinary):
 ])
 def test_decoder_usage_errors(toggles, argv):
     assert cli.main(argv, open_device=_opener(_capture(SQUARE))) == 1
+
+
+def test_decoder_meta_output(toggles, capsysbinary):
+    assert cli.main(["--samples", "15", "-P", "toggles:d=CH0", "-M", "toggles", "-A", "toggles=edge"],
+                    open_device=_opener(_capture(SQUARE))) == 0
+    assert capsysbinary.readouterr().out.decode().splitlines() == [   # -M replaces annotations
+        "toggles-1: Edges: 1", "toggles-1: Rate: 0.33333333333333331",
+        "toggles-1: Edges: 2", "toggles-1: Rate: 0.33333333333333331",
+        "toggles-1: Edges: 3", "toggles-1: Rate: 0.33333333333333331",
+        "toggles-1: Edges: 4", "toggles-1: Rate: 0.33333333333333331"]
+    assert cli.main(["--samples", "15", "-P", "toggles:d=CH0", "-M", "toggles,", "--protocol-decoder-samplenum"],
+                    open_device=_opener(_capture(SQUARE))) == 0
+    assert capsysbinary.readouterr().out.decode().splitlines()[:2] == [
+        "0-3 toggles-1: Edges: 1", "0-3 toggles-1: Rate: 0.33333333333333331"]
+
+
+def test_decoder_binary_wins_over_meta(toggles, tmp_path):
+    path = tmp_path / "raw.bin"
+    assert cli.main(["--samples", "15", "-P", "toggles:d=CH0", "-M", "toggles", "-B", "toggles", "-o", str(path)],
+                    open_device=_opener(_capture(SQUARE))) == 0
+    assert path.read_bytes() == b"0101"
+
+
+@pytest.mark.parametrize("argv, msg", [
+    (["-P", "toggles:d=CH0", "-M", "uart"], "Protocol decoder 'uart' not found."),
+    (["-M", "toggles"], "-A/-B/-M need protocol decoders (-P)"),
+    (["-P", "toggles:d=CH0:bad=yes", "-M", "toggles"], "registered as 'float'"),
+])
+def test_decoder_meta_errors(toggles, caplog, argv, msg):
+    assert cli.main(["--samples", "15"] + argv, open_device=_opener(_capture(SQUARE))) == 1
+    assert msg in caplog.text
 
 
 def test_show_decoder_without_device(toggles, capsys):

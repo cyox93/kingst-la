@@ -137,3 +137,22 @@ def test_uart_speed():
     lines = decode("uart:rx=CH0:baudrate=115200", x, 11_520_000, "uart=rx-data", 1 << 22)
     assert len(lines) == 1024
     assert time.perf_counter() - t < 10
+
+
+def meta(pd, samples, rate, ids):
+    out = io.StringIO()
+    printer = annotate.MetaPrinter(out, set(ids), samplenum=True)
+    sink = session.DecoderSink(loader.build_stacks([pd], CHANNELS, printer))
+    sink.begin(Meta(rate, CHANNELS))
+    for i in range(0, len(samples), 4093):
+        sink.feed(samples[i:i + 4093])
+    sink.end()
+    return out.getvalue().splitlines()
+
+
+def test_meta_bitrate():
+    # spi: 8 bits over samples 25..95 at 1 MHz -> int(8 / 71 us)
+    assert meta("spi:clk=CH0:mosi=CH1:cs=CH2", spi_signal(b"\x5a\xc3"), 1_000_000, ["spi"]) == [
+        "25-95 spi-1: Bitrate: 112676", "105-175 spi-1: Bitrate: 112676"]
+    lines = meta("i2c:scl=CH0:sda=CH1", i2c_signal(0x50, b"\x12\xab"), 1_000_000, ["i2c"])
+    assert len(lines) == 1 and lines[0].startswith("30-870 i2c-1: Bitrate: ")

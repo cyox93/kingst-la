@@ -58,11 +58,13 @@ la5016 --show -P uart                           # channels, options, annotation 
 la5016 -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -A uart=rx-data
 la5016 -c samplerate=4m --time 50ms -P i2c:scl=CH0:sda=CH1,eeprom24xx
 la5016 -c samplerate=10m --samples 1m -P uart:rx=CH0:baudrate=115200 -B uart=rx -o rx.bin
+la5016 -c samplerate=4m --time 50ms -P i2c:scl=CH0:sda=CH1 -M i2c     # meta output: "i2c-1: Bitrate: <bit/s>"
 ```
 
 The decoders are libsigrokdecode's own Python files, run unmodified by a pure Python
 `sigrokdecode` engine (no libsigrokdecode build needed). With `-P` the logic output is
-replaced by decoder output, as in sigrok-cli. `--protocol-decoder-samplenum` prefixes each
+replaced by decoder output, as in sigrok-cli. Only one kind is shown: `-B` binary, else `-M`
+meta values (i2c/spi bitrate, jitter counts), else `-A` annotations. `--protocol-decoder-samplenum` prefixes each
 annotation with its sample range; `-l 3`/`-l 4` add quotes, class ids and short texts.
 
 ### Session files

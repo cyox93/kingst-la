@@ -55,6 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="protocol decoder stack, e.g. uart:rx=CH0:baudrate=115200")
     p.add_argument("-A", "--protocol-decoder-annotations", metavar="PD[=ANN[:ANN...]][,...]")
     p.add_argument("-B", "--protocol-decoder-binary", metavar="PD[=CLASS][,...]")
+    p.add_argument("-M", "--protocol-decoder-meta", metavar="PD[,PD...]",
+                   help="show decoder meta output (e.g. i2c/spi bitrate) instead of annotations")
     p.add_argument("--protocol-decoder-samplenum", action="store_true", help="show sample numbers")
     p.add_argument("-L", "--list-supported", action="store_true", help="list formats and decoders")
     p.add_argument("--install-decoders", nargs="?", const="all", metavar="all|PD[,PD...]",
@@ -297,12 +299,15 @@ def _decoder_sink(args, channels: List[Channel], out: BinaryIO):
     import io
     from la5016.srd import annotate, loader, session
     try:
+        # Only one output type is shown: -B, else -M, else annotations (sigrok-cli main.c).
         if args.protocol_decoder_binary:
             callbacks = annotate.BinaryWriter(out, {})
         else:
             text = io.TextIOWrapper(out, encoding="utf-8", write_through=True)
             text.close = lambda: None  # the caller owns `out`
-            callbacks = annotate.AnnotationPrinter(text, {}, args.protocol_decoder_samplenum, args.loglevel)
+            cls = annotate.MetaPrinter if args.protocol_decoder_meta else annotate.AnnotationPrinter
+            callbacks = cls(text, set() if args.protocol_decoder_meta else {},
+                            args.protocol_decoder_samplenum, args.loglevel)
         stacks = loader.build_stacks(args.protocol_decoders, channels, callbacks)
         infos = {}
         todo = list(stacks)
@@ -312,6 +317,8 @@ def _decoder_sink(args, channels: List[Channel], out: BinaryIO):
             todo.extend(inst.next)
         if args.protocol_decoder_binary:
             callbacks.visible = annotate.parse_binary(args.protocol_decoder_binary, infos)
+        elif args.protocol_decoder_meta:
+            callbacks.visible = annotate.parse_meta(args.protocol_decoder_meta, infos)
         else:
             callbacks.visible = annotate.parse_annotations(args.protocol_decoder_annotations, infos)
     except loader.LoadError as e:
@@ -533,8 +540,9 @@ def main(argv: Optional[List[str]] = None, open_device=None) -> int:
             return cmd_install_decoders(args.install_decoders, args.decoders_commit, sys.stdout)
         if args.list_supported:
             return cmd_list(args, sys.stdout)
-        if (args.protocol_decoder_annotations or args.protocol_decoder_binary) and not args.protocol_decoders:
-            raise UsageError("-A/-B need protocol decoders (-P)")
+        if (args.protocol_decoder_annotations or args.protocol_decoder_binary
+                or args.protocol_decoder_meta) and not args.protocol_decoders:
+            raise UsageError("-A/-B/-M need protocol decoders (-P)")
         if args.show and args.protocol_decoders:
             return cmd_show_decoders(args, sys.stdout)
         if args.input_file:

@@ -76,3 +76,14 @@
 | 4 | CLI `-i`/`-I`, `-o` 기본 srzip, `-L` 입력 형식 | `cli.py` | 캡처 → `.sr` → `-i` csv/bits/vcd/`-P` |
 | 5 | 실기 | `.sr` 저장·재생, 스트리밍 저장 실시간성 | PWM1 루프백, 1채널 시작 워드 테스트 |
 
+---
+
+# 6차 구현 계획 — `-M` meta 출력
+
+| # | 작업 | 파일 | 검증 |
+|---|---|---|---|
+| 1 | `MetaPrinter`, `parse_meta`, `gvariant_number`, 형 검사 | `srd/annotate.py`, `srd/session.py` | 가짜 decoder, 숫자 형식 표 |
+| 2 | `-M`, `-B`>`-M`>`-A` | `cli.py` | 가짜 장치 end-to-end, 오류 |
+| 3 | 실제 decoder | `tests/test_srd_decoders.py` | spi/i2c bitrate |
+| 4 | 실기 | PWM1 → CH0을 SPI 클럭으로 | bitrate 계산값과 비교 |
+

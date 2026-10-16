@@ -334,7 +334,7 @@ sigrok 디코더 원본(`decoders/*/pd.py`)을 **수정 없이** 실행하는 �
 | 디코더 원본 | `la5016 --install-decoders`가 libsigrokdecode 고정 커밋(기본 `71f45144…`)의 tarball을 받아 `decoders/`만 사용자 데이터 폴더(`…/la5016/decoders/`, `LA5016_DECODERS_DIR`로 변경 가능)에 설치. 저장소에 넣지 않음 |
 | 실행 모델 | stack마다 워커 스레드 1개 + 동기 핸드오프 (libsigrokdecode와 같은 의미) |
 | 조건 매칭 | numpy 벡터화, C `find_match`와 같은 의미 |
-| CLI 범위 | `-P`, `-A`, `-B`, `-L`, `--show -P`, `--protocol-decoder-samplenum`. `-M`, JSON trace는 이후 |
+| CLI 범위 | `-P`, `-A`, `-B`, `-L`, `--show -P`, `--protocol-decoder-samplenum`. `-M`은 6차(25절), JSON trace는 이후 |
 | 의존성 | 추가 없음 (표준 라이브러리 + numpy) |
 
 ## 12. 모듈
@@ -604,3 +604,27 @@ PWM 주기 10샘플 신호로 위상을 맞춰 보면, 1채널 스트림의 **�
 원인은 FPGA/FX2 내부라 알 수 없다 (sigrok도 같은 순서로 시작하므로 같은 현상이 있을 것). 1채널 스트림에서 앞 4바이트를
 버린다 (`STREAM_SKIP_ONE_CHANNEL`). 시작이 32샘플 늦어질 뿐이다. 수정 후 10/50/100 MHz 1채널 80회 모두 위상 연속,
 `test_pwm_one_channel_stream_starts_in_phase`는 수정 전 코드에서 실패하고 수정 후 통과한다.
+
+---
+
+# 6차: 디코더 meta 출력 (`-M`)
+
+- 작성: 2026-10-17
+- 근거: sigrok-cli `main.c`, `decode.c`(`setup_pd_meta`, `show_pd_meta`), libsigrokdecode `type_decoder.c`(`convert_meta`)
+
+## 25. 동작
+
+| 항목 | 내용 |
+|---|---|
+| 옵션 | `-M PD[,PD...]` — 디코더 id만 (클래스 선택 없음). 빈 항목에서 목록 끝. 스택에 없는 id는 `Protocol decoder 'x' not found.` |
+| 우선순위 | 한 종류만 출력: `-B` > `-M` > `-A` (sigrok-cli와 같음. `-M`과 `-A`를 같이 주면 `-A`는 무시) |
+| 형식 | `[ss-es ]proto_id: 이름: 값`. 샘플 번호는 `--protocol-decoder-samplenum` 또는 `-l 3` 이상 |
+| 값 | `g_variant_print(…, FALSE)`: int64는 `%d`, double은 `g_ascii_dtostr`(`%.17g`)에 `.`/`e`/`n`이 없으면 `.0` (`115200.0`, `0.10000000000000001`, `inf`) |
+| 형 검사 | `convert_meta()`처럼 `int` 등록이면 `isinstance(int)`(bool 포함), `float`이면 `isinstance(float)`. 다르면 C와 같은 TypeError로 디코더 오류 |
+
+meta를 내는 설치 디코더는 `i2c`, `spi`(Bitrate), `jitter`(missed 횟수), `usb_power_delivery`. `pwm`은 등록만 하고 내지 않는다.
+
+**검증 (2026-10-17).** 합성 신호: spi 8비트가 71샘플(1 MHz) → `Bitrate: 112676` (= int(8 / 71 µs)), i2c 한 줄.
+실기: PWM1 100 kHz → CH0을 `spi:clk=CH0:mosi=CH0`로 10 MHz 0.1 s 캡처 → 1250줄 모두 `Bitrate: 114122`
+(= 8 / 701샘플), `-l 3`에서 `38-738 spi-1: …`.
+
